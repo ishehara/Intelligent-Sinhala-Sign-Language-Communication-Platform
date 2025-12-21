@@ -28,7 +28,7 @@ An intelligent mobile learning platform that adapts to individual learner needs 
 
 **Novelty**: First Sinhala sign language app using RL for personalized adaptive learning
 
-[📁 Component Documentation](./components/adaptive-learning/README.md)
+[📁 Component Documentation]([./components/adaptive-learning/README.md](https://github.com/ishehara/Intelligent-Sinhala-Sign-Language-Communication-Platform/blob/main/components/adaptive-learning/README.md?plain=1))
 
 ---
 
