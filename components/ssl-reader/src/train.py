@@ -89,8 +89,7 @@ class Trainer:
             self.optimizer,
             mode='min',
             factor=0.5,
-            patience=5,
-            verbose=True
+            patience=5
         )
         
         # Tensorboard writer
@@ -236,25 +235,33 @@ class Trainer:
     
     def save_checkpoint(self, is_best: bool = False):
         """Save model checkpoint."""
-        checkpoint = {
-            'epoch': self.current_epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'best_val_loss': self.best_val_loss,
-            'best_val_acc': self.best_val_acc,
-            'label_to_idx': self.label_to_idx
-        }
-        
-        # Save latest checkpoint
-        latest_path = self.save_dir / 'checkpoint_latest.pth'
-        torch.save(checkpoint, latest_path)
-        
-        # Save best checkpoint
-        if is_best:
-            best_path = self.save_dir / 'checkpoint_best.pth'
-            torch.save(checkpoint, best_path)
-            logger.info(f"Saved best model to {best_path}")
+        try:
+            checkpoint = {
+                'epoch': self.current_epoch,
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'scheduler_state_dict': self.scheduler.state_dict(),
+                'best_val_loss': self.best_val_loss,
+                'best_val_acc': self.best_val_acc,
+                'label_to_idx': self.label_to_idx
+            }
+            
+            # Ensure save directory exists
+            self.save_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Saving to directory: {self.save_dir.absolute()}")
+            
+            # Save latest checkpoint
+            latest_path = self.save_dir / 'checkpoint_latest.pth'
+            torch.save(checkpoint, str(latest_path))
+            logger.info(f"Saved latest model to {latest_path.absolute()}")
+            
+            # Save best checkpoint
+            if is_best:
+                best_path = self.save_dir / 'checkpoint_best.pth'
+                torch.save(checkpoint, str(best_path))
+                logger.info(f"Saved best model to {best_path.absolute()}")
+        except Exception as e:
+            logger.error(f"Failed to save checkpoint: {e}")
     
     def load_checkpoint(self, checkpoint_path: str):
         """Load model checkpoint."""
@@ -349,12 +356,15 @@ class Trainer:
 def main():
     parser = argparse.ArgumentParser(description='Train Sinhala Sign Language Recognition Model')
     
+    # Get project root (3 levels up from this file)
+    project_root = Path(__file__).parent.parent.parent.parent
+    
     # Data arguments
     parser.add_argument('--dataset_root', type=str, 
-                       default='../../datasets/signVideo',
+                       default=str(project_root / 'datasets' / 'signVideo'),
                        help='Root directory of the video dataset')
     parser.add_argument('--cache_dir', type=str,
-                       default='../data/processed',
+                       default=str(Path(__file__).parent.parent / 'data' / 'processed'),
                        help='Directory to cache preprocessed features')
     parser.add_argument('--preprocess', action='store_true',
                        help='Preprocess all videos before training')
@@ -387,9 +397,11 @@ def main():
                        help='Device to use for training')
     parser.add_argument('--num_workers', type=int, default=4,
                        help='Number of data loading workers')
-    parser.add_argument('--save_dir', type=str, default='../models',
+    parser.add_argument('--save_dir', type=str, 
+                       default=str(Path(__file__).parent.parent / 'models'),
                        help='Directory to save models')
-    parser.add_argument('--log_dir', type=str, default='../logs',
+    parser.add_argument('--log_dir', type=str, 
+                       default=str(Path(__file__).parent.parent / 'logs'),
                        help='Directory for logs')
     parser.add_argument('--resume', type=str, default=None,
                        help='Path to checkpoint to resume from')
@@ -416,14 +428,26 @@ def main():
     
     # Create model
     logger.info(f"Creating {args.model_type} model...")
+    
+    # Prepare model kwargs based on model type
+    model_kwargs = {
+        'hidden_dim': args.hidden_dim,
+        'dropout': args.dropout,
+        'max_seq_len': args.max_frames
+    }
+    
+    # For hybrid model, use separate layer counts
+    if args.model_type == 'hybrid':
+        model_kwargs['num_lstm_layers'] = args.num_layers
+        model_kwargs['num_transformer_layers'] = args.num_layers
+    else:
+        model_kwargs['num_layers'] = args.num_layers
+    
     model = create_model(
         model_type=args.model_type,
         input_dim=input_dim,
         num_classes=num_classes,
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        dropout=args.dropout,
-        max_seq_len=args.max_frames
+        **model_kwargs
     )
     
     # Create trainer

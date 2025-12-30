@@ -11,6 +11,10 @@ ENV/
 dist/
 build/
 
+# Training logs and outputs
+logs/
+*.log
+
 # Datasets (too large for git)
 datasets/
 *.csv

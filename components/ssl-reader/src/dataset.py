@@ -208,12 +208,12 @@ def create_data_loaders(
         logger.info("Preprocessing test set...")
         test_dataset.preprocess_all()
     
-    # Create data loaders
+    # Create data loaders (num_workers=0 for Windows compatibility)
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
+        num_workers=0,
         pin_memory=True
     )
     
@@ -221,7 +221,7 @@ def create_data_loaders(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=0,
         pin_memory=True
     )
     
@@ -229,7 +229,7 @@ def create_data_loaders(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=0,
         pin_memory=True
     )
     
@@ -244,8 +244,10 @@ def create_data_loaders(
 
 if __name__ == "__main__":
     # Example usage
-    dataset_root = "../../datasets/signVideos"
-    cache_dir = "../data/processed"
+    from pathlib import Path
+    project_root = Path(__file__).parent.parent.parent.parent
+    dataset_root = str(project_root / 'datasets' / 'signVideo')
+    cache_dir = str(Path(__file__).parent.parent / 'data' / 'processed')
     
     train_loader, val_loader, test_loader, label_to_idx, num_classes = create_data_loaders(
         dataset_root=dataset_root,
