@@ -1,0 +1,75 @@
+# Sinhala Sign Language Recognition - Requirements
+# Optimized for ON-DEVICE PROCESSING with privacy and real-time performance
+# Compatible with Python 3.13+
+
+# Core deep learning (optimized for edge deployment)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Computer vision (simple feature extraction without MediaPipe)
+opencv-python>=4.8.0
+
+# Data processing
+numpy>=1.26.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+Pillow>=10.0.0
+
+# Progress and logging
+tqdm>=4.65.0
+tensorboard>=2.13.0
+
+# Configuration and utilities
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# ========================================
+# ON-DEVICE OPTIMIZATION TOOLS
+# ========================================
+
+# Model optimization and quantization for faster inference
+onnx>=1.15.0
+onnxruntime>=1.16.0
+# onnxruntime-gpu>=1.16.0  # Uncomment for GPU acceleration
+
+# Model compression and optimization (optional)
+# torch-pruning>=1.3.0  # Uncomment for model pruning (may have Python 3.13 issues)
+
+# ========================================
+# MOBILE & ANDROID DEPLOYMENT
+# ========================================
+
+# TensorFlow for model conversion to TFLite (Android)
+tensorflow>=2.20.0  # Required for TFLite conversion (Python 3.13+ compatible)
+# onnx-tf>=1.10.0  # ONNX to TensorFlow converter (optional, may have compatibility issues)
+
+# Mobile optimization
+# coremltools>=7.0  # For iOS deployment (optional)
+
+# React Native Bridge (optional - for development/testing)
+flask>=3.0.0  # Local API server for React Native
+flask-cors>=4.0.0  # CORS support
+websockets>=12.0  # Real-time communication
+
+# Additional mobile tools
+# tensorflowjs>=4.10.0  # For web deployment (optional)
+
+# ========================================
+# PERFORMANCE OPTIMIZATION (OPTIONAL)
+# ========================================
+
+# GPU acceleration (choose based on your CUDA version)
+# cupy-cuda11x>=12.0.0  # Uncomment if using CUDA 11.x
+# cupy-cuda12x>=12.0.0  # Uncomment if using CUDA 12.x
+
+# Faster data loading
+# nvidia-dali-cuda110  # Uncomment for NVIDIA DALI acceleration
+
+# ========================================
+# NOTES FOR ON-DEVICE DEPLOYMENT
+# ========================================
+# - All processing happens locally (no cloud/API calls)
+# - MediaPipe runs entirely on-device
+# - Models can be quantized for mobile devices
+# - ONNX export enables deployment on various platforms
+# - Use model pruning to reduce size and improve speed
