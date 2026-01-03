@@ -38,15 +38,16 @@ An intelligent mobile learning platform that adapts to individual learner needs 
 ### 2. Environmental Sound Alert Module
 **Developer**: IT22325464 – Kodithuwakku M.A.S.S.H.
 
-A real-time sound detection and classification system that provides context-rich environmental awareness.
+A real-time environmental sound detection and classification module designed to provide context-aware alerts for improved situational awareness, particularly for Deaf and hard-of-hearing users.
 
 **Key Features**:
-- Vehicle horn classification (car, bus, train, motorcycle, truck)
-- Continuous critical sound monitoring (fire alarms, sirens, loudspeakers)
-- Urgency-based alert prioritization
-- Multi-modal notifications (vibration, screen flash, banners, emojis)
 
-**Novelty**: Granular vehicle horn classification for enhanced situational awareness
+- Vehicle horn classification (car, bus, train, motorcycle, truck)
+- Continuous monitoring of critical environmental sounds (fire alarms, emergency sirens)
+- Urgency-based alert prioritization to highlight high-risk situations
+- Multi-modal notifications including vibration patterns, screen flashes, visual banners, and emoji-based alerts
+
+**Novelty**: Fine-grained vehicle horn classification combined with urgency-aware, multi-modal alerts to enhance real-time environmental awareness.
 
 [📁 Component Documentation](./components/sound-alert/README.md)
 
