@@ -20,7 +20,7 @@ In Sri Lanka, children with speaking disabilities face significant communication
 ### 1. Text/Touch-to-Sign Conversion
 - **Parent Input Options**:
   - Type Sinhala text using keyboard
-  - Select pre-defined phrases (common questions, instructions)
+  - Select pre-defined phrases (common words)
   - Choose from categorized icon library (food, activities, emotions)
 - **Sign Output**:
   - 3D animated avatar performing SSL signs
@@ -30,14 +30,12 @@ In Sri Lanka, children with speaking disabilities face significant communication
 
 ### 2. Child Expression Interface
 - **Multiple Input Methods**:
-  - Camera-based sign recognition
   - Icon/picture selection interface
   - Emotion selector (visual faces)
   - Quick needs buttons (eat, drink, toilet, play, hurt)
 - **Visual Feedback**:
   - Selected item highlights
   - Confirmation animations
-  - Sound effects (optional)
 
 ### 3. Emotion and Feedback Layer
 - **Emotional Expression**:
@@ -45,11 +43,7 @@ In Sri Lanka, children with speaking disabilities face significant communication
   - Color-coded emotional states (green=happy, blue=sad, red=angry)
   - Intensity indicators (slightly, very)
   - Contextual emotion suggestions
-- **Parent Feedback**:
-  - Visual acknowledgment (✓ seen, ❤️ understood)
-  - Comfort animations (hug, pat)
-  - Encouragement stickers
-  - Response status indicators
+
 
 ### 4. Daily Communication Templates
 - **Pre-Built Scenarios**:
@@ -62,14 +56,11 @@ In Sri Lanka, children with speaking disabilities face significant communication
 
 ### 5. Offline Functionality
 - **No Internet Required**:
-  - All sign animations stored locally
+  - All sign images stored locally
   - Offline icon library
   - Local database of phrases
   - Works in rural areas
-- **Data Sync** (optional):
-  - Sync conversation history when online
-  - Download new sign packs
-  - Backup settings
+
 
 ## 🔬 Technical Approach
 
@@ -81,7 +72,7 @@ Text Input / Icon Selection
          ↓
 Text-to-Sign Mapping
          ↓
-3D Animation Rendering
+Sign image
          ↓
 Display to Child
 
@@ -92,7 +83,7 @@ Visual Recognition / Direct Input
          ↓
 Text Generation
          ↓
-Display to Parent + Audio (optional)
+Display to Parent
 ```
 
 ### System Components
@@ -103,11 +94,8 @@ Display to Parent + Audio (optional)
    - Output: Sequence of sign animation IDs
    - Special handling: Compound words, fingerspelling
 
-2. **3D Sign Animation System**
-   - Format: Skeletal animation (BVH/FBX)
-   - Rendering: Unity 3D or Three.js
-   - Features: Smooth transitions, facial expressions
-   - Optimization: Compressed animations for mobile
+2. **2D Sign images System**
+   - Format: 2D hand drawn images
 
 3. **Sign Recognition Module** (Optional)
    - Model: Lightweight CNN for mobile
@@ -116,8 +104,8 @@ Display to Parent + Audio (optional)
    - Fallback: Icon selection if low confidence
 
 4. **Icon Library System**
-   - Categories: 15+ domains (food, school, emotions, etc.)
-   - Icons: 500+ culturally appropriate images
+   - Categories: 5+ domains (food, school, emotions, etc.)
+   - Icons: 40+ culturally appropriate images
    - Search: Visual search and text search
    - Customization: Add family-specific icons
 
@@ -163,7 +151,7 @@ Display to Parent + Audio (optional)
 ## 📊 Content Requirements
 
 ### Sign Animation Library
-- **Basic Signs**: 1000+ common words and phrases
+- **Basic Signs**: 50+ common words and phrases
 - **Daily Vocabulary**: Food, clothing, activities, emotions
 - **Question Signs**: What, where, when, who, why, how
 - **Social Signs**: Please, thank you, sorry, help
@@ -442,20 +430,22 @@ MIT License - See main project LICENSE file
 ## 👤 Developer
 
 **De Silva U.P.A.N.** (IT22308870)
-- Email: [developer-email]
+- Email: asanganavodidesilva@gmail.com
 - Focus: HCI, Accessibility, Mobile Development, Visual Communication
 
 ## 🙏 Special Thanks
 
 - Sri Lankan Deaf community
 - Families with children with speaking disabilities
+- Hashila, Indumini and their parents
+- Ms. Pradeepa
 - Special education teachers
 - Sign language interpreters
 - UX/UI designers
 
 ---
 
-**Component Status**: Active Development | **Version**: 0.1.0 | **Last Updated**: December 2025
+**Component Status**: Active Development | **Version**: 0.1.0 | **Last Updated**: January 2025
 
 ## 📞 Support and Feedback
 
