@@ -23,7 +23,7 @@ In Sri Lanka, children with speaking disabilities face significant communication
   - Select pre-defined phrases (common words)
   - Choose from categorized icon library (food, activities, emotions)
 - **Sign Output**:
-  - 3D animated avatar performing SSL signs
+  - 2D hand drawn SSL signs
   - Smooth, natural sign animations
   - Loop and replay options
   - Adjustable animation speed
