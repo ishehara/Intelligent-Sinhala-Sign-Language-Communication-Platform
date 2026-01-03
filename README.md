@@ -69,19 +69,19 @@ An intelligent SSL reader that integrates gestures, emotions, and context for na
 
 ---
 
-### 4. Two-Way Communication System for Children
+### 4. Introducing a Sinhala Two-Way Communication System for Children with Speaking Disabilities
 **Developer**: IT22308870 – De Silva U.P.A.N.
 
-An HCI-based visual communication platform enabling natural interaction between children with speaking disabilities and their families.
+An HCI-based Sinhala Sign Language communication system that enables non-verbal, visual, and emotional-driven two-way interaction for children with speaking disabilities and their parents.
 
 **Key Features**:
-- Text/Touch-to-Sign conversion with animations
+- Text/Touch-to-Sign conversion with images
 - Emotion and feedback layer with visual cues
 - Offline functionality for rural accessibility
 - Icon-based communication for daily needs
 - Culturally adapted interaction methods
 
-**Novelty**: First two-way SSL communication system designed for family-centered daily interaction
+**Novelty**: First two-way SSL communication system designed for child family-centered daily interaction
 
 [📁 Component Documentation](./components/two-way-comm/README.md)
 
@@ -172,6 +172,8 @@ Each component has its own setup requirements. Refer to individual component REA
 - Environmental sound recordings (vehicle horns, alarms, sirens)
 - Facial expression and emotion datasets
 - User interaction and learning progress data
+- Interviews with direct parents, teachers and children
+- Through some assignments
 
 ### Evaluation Metrics
 
@@ -225,7 +227,7 @@ We welcome contributions from researchers, developers, and community members! Pl
 - **Silva H.T.P.** (IT22315878) - Adaptive Learning System
 - **Kodithuwakku M.A.S.S.H.** (IT22325464) - Environmental Sound Alert
 - **Liyanage M.L.I.S.** (IT22304674) - SSL Reader with Emotion Recognition
-- **De Silva U.P.A.N.** (IT22308870) - Two-Way Communication System
+- **De Silva U.P.A.N.** (IT22308870) - Introducing a Sinhala Two-Way Communication System for Children with Speaking Disabilities
 
 
 ## 🙏 Acknowledgments
