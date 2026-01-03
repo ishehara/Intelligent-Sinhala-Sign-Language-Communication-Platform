@@ -13,6 +13,9 @@ This research project addresses critical gaps in Sinhala Sign Language (SSL) edu
 - **Emotion-Integrated Recognition**: Holistic SSL reader combining gestures, emotions, and expressive speech synthesis
 - **Family-Centered Communication**: Two-way visual communication system designed for children and parents
 
+### Integrated System Architecture
+![image alt](https://github.com/ishehara/Intelligent-Sinhala-Sign-Language-Communication-Platform/blob/793fbd1cb27094e37adcdc90008aa7b183b83d0c/Integrated%20System%20Architecture.png)
+
 ## 📦 Components
 
 ### 1. Adaptive Sinhala Sign Language Learning System
