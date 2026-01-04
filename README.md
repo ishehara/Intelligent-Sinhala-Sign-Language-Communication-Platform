@@ -13,6 +13,9 @@ This research project addresses critical gaps in Sinhala Sign Language (SSL) edu
 - **Emotion-Integrated Recognition**: Holistic SSL reader combining gestures, emotions, and expressive speech synthesis
 - **Family-Centered Communication**: Two-way visual communication system designed for children and parents
 
+### Integrated System Architecture
+![image alt](https://github.com/ishehara/Intelligent-Sinhala-Sign-Language-Communication-Platform/blob/main/Integrated%20System%20Architecture.png)
+
 ## 📦 Components
 
 ### 1. Adaptive Sinhala Sign Language Learning System
@@ -35,15 +38,16 @@ An intelligent mobile learning platform that adapts to individual learner needs 
 ### 2. Environmental Sound Alert Module
 **Developer**: IT22325464 – Kodithuwakku M.A.S.S.H.
 
-A real-time sound detection and classification system that provides context-rich environmental awareness.
+A real-time environmental sound detection and classification module designed to provide context-aware alerts for improved situational awareness, particularly for Deaf and hard-of-hearing users.
 
 **Key Features**:
-- Vehicle horn classification (car, bus, train, motorcycle, truck)
-- Continuous critical sound monitoring (fire alarms, sirens, loudspeakers)
-- Urgency-based alert prioritization
-- Multi-modal notifications (vibration, screen flash, banners, emojis)
 
-**Novelty**: Granular vehicle horn classification for enhanced situational awareness
+- Vehicle horn classification (car, bus, train, motorcycle, truck)
+- Continuous monitoring of critical environmental sounds (fire alarms, emergency sirens)
+- Urgency-based alert prioritization to highlight high-risk situations
+- Multi-modal notifications including vibration patterns, screen flashes, visual banners, and emoji-based alerts
+
+**Novelty**: Fine-grained vehicle horn classification combined with urgency-aware, multi-modal alerts to enhance real-time environmental awareness.
 
 [📁 Component Documentation](./components/sound-alert/README.md)
 
@@ -66,19 +70,19 @@ An intelligent SSL reader that integrates gestures, emotions, and context for na
 
 ---
 
-### 4. Two-Way Communication System for Children
+### 4. Introducing a Sinhala Two-Way Communication System for Children with Speaking Disabilities
 **Developer**: IT22308870 – De Silva U.P.A.N.
 
-An HCI-based visual communication platform enabling natural interaction between children with speaking disabilities and their families.
+An HCI-based Sinhala Sign Language communication system that enables non-verbal, visual, and emotional-driven two-way interaction for children with speaking disabilities and their parents.
 
 **Key Features**:
-- Text/Touch-to-Sign conversion with animations
+- Text/Touch-to-Sign conversion with images
 - Emotion and feedback layer with visual cues
 - Offline functionality for rural accessibility
 - Icon-based communication for daily needs
 - Culturally adapted interaction methods
 
-**Novelty**: First two-way SSL communication system designed for family-centered daily interaction
+**Novelty**: First two-way SSL communication system designed for child family-centered daily interaction
 
 [📁 Component Documentation](./components/two-way-comm/README.md)
 
@@ -169,6 +173,8 @@ Each component has its own setup requirements. Refer to individual component REA
 - Environmental sound recordings (vehicle horns, alarms, sirens)
 - Facial expression and emotion datasets
 - User interaction and learning progress data
+- Interviews with direct parents, teachers and children
+- Through some assignments
 
 ### Evaluation Metrics
 
@@ -222,7 +228,7 @@ We welcome contributions from researchers, developers, and community members! Pl
 - **Silva H.T.P.** (IT22315878) - Adaptive Learning System
 - **Kodithuwakku M.A.S.S.H.** (IT22325464) - Environmental Sound Alert
 - **Liyanage M.L.I.S.** (IT22304674) - SSL Reader with Emotion Recognition
-- **De Silva U.P.A.N.** (IT22308870) - Two-Way Communication System
+- **De Silva U.P.A.N.** (IT22308870) - Introducing a Sinhala Two-Way Communication System for Children with Speaking Disabilities
 
 
 ## 🙏 Acknowledgments
