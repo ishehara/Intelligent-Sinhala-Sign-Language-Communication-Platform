@@ -1,0 +1,10 @@
+{
+  "n_mfcc": 13,
+  "n_frames": 40,
+  "sample_rate": 22050,
+  "duration": 2.5,
+  "feature_shape": 520,
+  "n_train_samples": 729,
+  "n_test_samples": 183,
+  "n_classes": 5
+}

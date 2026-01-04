@@ -1,0 +1,17 @@
+{
+  "encoder": {
+    "bus horns": 0,
+    "car horns": 1,
+    "motorcycle horns": 2,
+    "train horns": 3,
+    "truck horns": 4
+  },
+  "decoder": {
+    "0": "bus horns",
+    "1": "car horns",
+    "2": "motorcycle horns",
+    "3": "train horns",
+    "4": "truck horns"
+  },
+  "n_classes": 5
+}
