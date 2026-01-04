@@ -161,14 +161,11 @@ Contributions are welcome! Focus areas:
 - UX/UI enhancements
 - Performance optimization
 
-## 📝 License
-
-MIT License - See main project LICENSE file
 
 ## 👤 Developer
 
 **Silva H.T.P.** (IT22315878)
-- Email: [developer-email]
+- Email: [it22315878@my.sliit.lk]
 - Focus: Reinforcement Learning, Adaptive Systems, Sign Language Recognition
 
 ---
