@@ -39,12 +39,14 @@ class MediaPipeFeatureExtractor:
     # Model URLs for MediaPipe tasks
     HAND_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
     POSE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker/float16/latest/pose_landmarker.task"
+    FACE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
     
     def __init__(
         self,
         max_frames: int = 60,
         use_hands: bool = True,
         use_pose: bool = False,  # Disabled by default - pose model URL needs update
+        use_face: bool = True,  # Enable facial expression capture
         model_dir: str = None
     ):
         """
@@ -54,6 +56,7 @@ class MediaPipeFeatureExtractor:
             max_frames: Maximum number of frames to extract per video
             use_hands: Whether to extract hand landmarks
             use_pose: Whether to extract pose landmarks
+            use_face: Whether to extract facial landmarks for emotion detection
             model_dir: Directory to store/load model files
         """
         if not HAS_MEDIAPIPE:
@@ -62,6 +65,7 @@ class MediaPipeFeatureExtractor:
         self.max_frames = max_frames
         self.use_hands = use_hands
         self.use_pose = use_pose
+        self.use_face = use_face
         
         # Setup model directory
         if model_dir is None:
@@ -135,6 +139,26 @@ class MediaPipeFeatureExtractor:
             self.pose_landmarker = vision.PoseLandmarker.create_from_options(options)
         else:
             self.pose_landmarker = None
+        
+        if self.use_face:
+            face_model_path = self._download_model(self.FACE_MODEL_URL, "face_landmarker.task")
+            
+            # Create face landmarker with GPU delegate
+            base_options = python.BaseOptions(
+                model_asset_path=str(face_model_path),
+                delegate=python.BaseOptions.Delegate.GPU
+            )
+            options = vision.FaceLandmarkerOptions(
+                base_options=base_options,
+                num_faces=1,
+                min_face_detection_confidence=0.3,
+                min_face_presence_confidence=0.3,
+                min_tracking_confidence=0.3,
+                output_face_blendshapes=True  # Enable blendshapes for emotion detection
+            )
+            self.face_landmarker = vision.FaceLandmarker.create_from_options(options)
+        else:
+            self.face_landmarker = None
     
     def extract_frame_features(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -176,6 +200,17 @@ class MediaPipeFeatureExtractor:
                 # Use zeros if detection fails
                 features.append(np.zeros(33 * 3))  # 33 landmarks, 3 coords each
         
+        # Extract face landmarks
+        if self.face_landmarker:
+            try:
+                face_result = self.face_landmarker.detect(mp_image)
+                face_features = self._process_face_landmarks(face_result)
+                features.append(face_features)
+            except Exception as e:
+                logger.warning(f"Face detection failed: {e}")
+                # Use zeros if detection fails
+                features.append(np.zeros(468 * 3 + 52))  # 468 landmarks + 52 blendshapes
+        
         # Combine all features
         return np.concatenate(features) if features else np.zeros(1)
     
@@ -205,6 +240,28 @@ class MediaPipeFeatureExtractor:
         
         return pose_features
     
+    def _process_face_landmarks(self, result) -> np.ndarray:
+        """Process face landmark and blendshape results into feature vector."""
+        # Face has 468 landmarks with x, y, z coordinates + 52 blendshapes for emotion
+        face_features = np.zeros(468 * 3 + 52)
+        
+        if result.face_landmarks:
+            face_landmarks = result.face_landmarks[0]  # First face
+            
+            # Extract 468 face landmarks
+            for lm_idx, landmark in enumerate(face_landmarks):
+                base_idx = lm_idx * 3
+                face_features[base_idx:base_idx + 3] = [landmark.x, landmark.y, landmark.z]
+            
+            # Extract blendshapes (facial expressions)
+            if result.face_blendshapes:
+                blendshapes = result.face_blendshapes[0]  # First face blendshapes
+                for bs_idx, blendshape in enumerate(blendshapes):
+                    if bs_idx < 52:  # MediaPipe has 52 blendshapes
+                        face_features[468 * 3 + bs_idx] = blendshape.score
+        
+        return face_features
+    
     def get_feature_dim(self) -> int:
         """Get the dimension of extracted features."""
         dim = 0
@@ -212,6 +269,8 @@ class MediaPipeFeatureExtractor:
             dim += 21 * 2 * 3  # 2 hands, 21 landmarks, 3 coords = 126
         if self.use_pose:
             dim += 33 * 3  # 33 landmarks, 3 coords = 99
+        if self.use_face:
+            dim += 468 * 3 + 52  # 468 landmarks (3 coords) + 52 blendshapes = 1456
         return dim if dim > 0 else 1
     
     def process_video(self, video_path: str) -> Optional[np.ndarray]:
