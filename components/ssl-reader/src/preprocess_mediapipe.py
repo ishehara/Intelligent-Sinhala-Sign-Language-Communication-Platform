@@ -23,8 +23,8 @@ def preprocess_all_videos(dataset_root: str, cache_dir: str, max_frames: int = 6
     
     # Initialize MediaPipe
     print("\n[1/4] Initializing MediaPipe...")
-    extractor = MediaPipeFeatureExtractor(max_frames=max_frames, use_hands=True, use_pose=False)
-    print(f"✓ Feature dimension: {extractor.get_feature_dim()} (hand landmarks)")
+    extractor = MediaPipeFeatureExtractor(max_frames=max_frames, use_hands=True, use_face=True, use_pose=False)
+    print(f"✓ Feature dimension: {extractor.get_feature_dim()} (hands: 126 + face: 1456 = 1582)")
     
     # Get dataset splits
     print("\n[2/4] Loading dataset...")
