@@ -7,7 +7,6 @@ Developer: IT22304674 – Liyanage M.L.I.S.
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 from pathlib import Path
 import json
 import argparse
@@ -16,6 +15,14 @@ import logging
 from datetime import datetime
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    HAS_TENSORBOARD = True
+except ImportError:
+    logger.warning("TensorBoard not available, logging to console only")
+    HAS_TENSORBOARD = False
+    SummaryWriter = None
 
 from dataset import create_data_loaders
 from models import create_model
@@ -93,7 +100,10 @@ class Trainer:
         )
         
         # Tensorboard writer
-        self.writer = SummaryWriter(self.log_dir)
+        if HAS_TENSORBOARD:
+            self.writer = SummaryWriter(self.log_dir)
+        else:
+            self.writer = None
         
         # Training state
         self.current_epoch = 0
@@ -291,12 +301,13 @@ class Trainer:
             self.scheduler.step(val_metrics['loss'])
             
             # Log metrics
-            self.writer.add_scalar('Loss/train', train_metrics['loss'], epoch)
-            self.writer.add_scalar('Loss/val', val_metrics['loss'], epoch)
-            self.writer.add_scalar('Accuracy/train', train_metrics['accuracy'], epoch)
-            self.writer.add_scalar('Accuracy/val', val_metrics['accuracy'], epoch)
-            self.writer.add_scalar('F1/val', val_metrics['f1'], epoch)
-            self.writer.add_scalar('Learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
+            if self.writer:
+                self.writer.add_scalar('Loss/train', train_metrics['loss'], epoch)
+                self.writer.add_scalar('Loss/val', val_metrics['loss'], epoch)
+                self.writer.add_scalar('Accuracy/train', train_metrics['accuracy'], epoch)
+                self.writer.add_scalar('Accuracy/val', val_metrics['accuracy'], epoch)
+                self.writer.add_scalar('F1/val', val_metrics['f1'], epoch)
+                self.writer.add_scalar('Learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
             
             # Print metrics
             logger.info(f"\nEpoch {epoch + 1}/{self.num_epochs}:")
@@ -350,7 +361,8 @@ class Trainer:
         with open(self.save_dir / 'test_results.json', 'w') as f:
             json.dump(results, f, indent=2)
         
-        self.writer.close()
+        if self.writer:
+            self.writer.close()
 
 
 def main():
@@ -432,15 +444,18 @@ def main():
     # Prepare model kwargs based on model type
     model_kwargs = {
         'hidden_dim': args.hidden_dim,
-        'dropout': args.dropout,
-        'max_seq_len': args.max_frames
+        'dropout': args.dropout
     }
     
-    # For hybrid model, use separate layer counts
+    # For hybrid model, use separate layer counts and max_seq_len
     if args.model_type == 'hybrid':
         model_kwargs['num_lstm_layers'] = args.num_layers
         model_kwargs['num_transformer_layers'] = args.num_layers
-    else:
+        model_kwargs['max_seq_len'] = args.max_frames
+    elif args.model_type == 'transformer':
+        model_kwargs['num_layers'] = args.num_layers
+        model_kwargs['max_seq_len'] = args.max_frames
+    else:  # lstm
         model_kwargs['num_layers'] = args.num_layers
     
     model = create_model(

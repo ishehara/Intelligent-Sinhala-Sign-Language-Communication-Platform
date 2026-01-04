@@ -171,14 +171,15 @@ def create_data_loaders(
     
     num_classes = len(label_to_idx)
     
-    # Create feature extractor
-    feature_extractor = VideoFeatureExtractor(max_frames=max_frames)
+    # Create feature extractors (with augmentation for training only)
+    train_feature_extractor = VideoFeatureExtractor(max_frames=max_frames, use_augmentation=True)
+    val_test_feature_extractor = VideoFeatureExtractor(max_frames=max_frames, use_augmentation=False)
     
     # Create datasets
     train_dataset = SinhalaSignLanguageDataset(
         samples=splits['train'],
         label_to_idx=label_to_idx,
-        feature_extractor=feature_extractor,
+        feature_extractor=train_feature_extractor,
         cache_dir=cache_dir,
         use_cache=(cache_dir is not None)
     )
@@ -186,7 +187,7 @@ def create_data_loaders(
     val_dataset = SinhalaSignLanguageDataset(
         samples=splits['val'],
         label_to_idx=label_to_idx,
-        feature_extractor=feature_extractor,
+        feature_extractor=val_test_feature_extractor,
         cache_dir=cache_dir,
         use_cache=(cache_dir is not None)
     )
@@ -194,7 +195,7 @@ def create_data_loaders(
     test_dataset = SinhalaSignLanguageDataset(
         samples=splits['test'],
         label_to_idx=label_to_idx,
-        feature_extractor=feature_extractor,
+        feature_extractor=val_test_feature_extractor,
         cache_dir=cache_dir,
         use_cache=(cache_dir is not None)
     )

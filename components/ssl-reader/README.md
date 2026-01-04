@@ -19,22 +19,24 @@ Most SSL recognition systems focus solely on hand gestures, neglecting critical 
 
 ### 1. Multimodal Sign Detection
 - **Hand Gesture Recognition**: 21-point hand landmark tracking per hand
+- **Dual Hand Support**: Tracks both hands simultaneously (42 landmarks total)
+- **Feature Vector**: 126 dimensions (2 hands × 21 landmarks × 3 coordinates)
+- **Temporal Analysis**: LSTM and Hybrid models for dynamic sign sequences
+- **227 Sign Classes**: Comprehensive Sinhala sign vocabulary
 - **Facial Expression Analysis**: 468 facial landmarks for emotion detection
 - **Body Pose Detection**: 33 body keypoints for posture and movement
-- **Temporal Analysis**: LSTM/Transformer for dynamic sign sequences
 - **Context Integration**: Combines all modalities for accurate interpretation
 
 ### 2. Real-Time Emotion Recognition
 - **Facial Emotion Detection**: Happiness, sadness, anger, surprise, fear, neutral
 - **Expression Intensity**: Measures degree of emotional expression
 - **Contextual Emotions**: Urgency, emphasis, questioning
-- **Cultural Adaptation**: Considers SSL-specific emotional expressions
+- **Cultural Adaptation**: SSL-specific emotional expressions
 - **Confidence Scoring**: Provides reliability metrics for predictions
 
 ### 3. Emotion-Aware Speech Synthesis
-- **Expressive TTS**: Modulates voice tone, pitch, and speed based on emotion
+- **Expressive TTS**: Voice modulation based on detected emotion
 - **Natural Sinhala Voice**: High-quality, culturally appropriate speech
-- **Emotion Mapping**: Happy→cheerful voice, Sad→softer tone, Urgent→faster pace
 - **Prosody Control**: Stress, intonation, and rhythm adaptation
 - **Non-Robotic Output**: Reduces mechanical speech patterns
 
@@ -57,9 +59,11 @@ Multi-Modal Feature Extraction
 ├─ Face Mesh (MediaPipe Face)
 └─ Pose Detection (MediaPipe Pose)
          ↓
-Feature Normalization & Preprocessing
+Feature Fusion & Normalization
          ↓
 Temporal Modeling (LSTM/Transformer)
+├─ LSTM: 512 hidden units, 3 layers
+└─ Hybrid: LSTM + CNN features
          ↓
 Sign Classification + Emotion Recognition
          ↓
@@ -71,10 +75,15 @@ Sinhala Speech Output
 ### Machine Learning Models
 
 1. **Hand Gesture Model**
-   - Base: MediaPipe Hands (21 landmarks × 2 hands)
-   - Classifier: LSTM + Attention or Transformer
-   - Output: Sign class + confidence
-   - Features: Normalized coordinates, hand shape, movement
+   - **Base**: MediaPipe Hands (21 landmarks × 2 hands = 126 features)
+   - **Architecture Options**:
+     - **LSTM Model**: 512 hidden units, 3 layers, dropout 0.3
+     - **Hybrid Model**: LSTM + 1D CNN for spatial-temporal features
+   - **Output**: 227 sign classes + confidence scores
+   - **Features**: Normalized 3D hand coordinates, temporal sequences
+   - **Training**: PyTorch 2.7.1 with CUDA 11.8 on NVIDIA GPU
+   - **Model Size**: ~4.1M parameters (Hybrid), ~2.9M (LSTM)
+   - **Deployment**: TensorFlow Lite for on-device inference
 
 2. **Facial Emotion Model**
    - Base: MediaPipe Face Mesh (468 landmarks)
@@ -92,10 +101,6 @@ Sinhala Speech Output
    - Inputs: Hand features, face features, pose features
    - Output: Final sign prediction + emotional context
 
-5. **Emotion-to-Speech Mapper**
-   - Input: Emotion class, intensity, sign text
-   - Output: SSML (Speech Synthesis Markup Language)
-   - Controls: Pitch, rate, volume, emphasis
 
 ## 🏗️ System Architecture
 
@@ -131,10 +136,23 @@ Sinhala Speech Output
 ## 📊 Dataset Requirements
 
 ### Sign Language Video Dataset
+- **Total Classes**: 227+ unique signs
+- **Total Videos**: 2,623+ samples
+- **Dataset Splits**:
+  - Training: 1,729 videos (65.9%)
+  - Validation: 293 videos (11.2%)
+  - Test: 601 videos (22.9%)
+- **Sign Categories**:
+  - Adjectives, Adverbs, Colors, Conjunctions
+  - Days, Determiners, Greetings, Interjections
+  - Months, Nouns, Numbers, People, Places
+  - Prepositions, Vehicles, Verbs
 - **Static Signs**: 500+ unique signs × 20 samples each
 - **Dynamic Signs**: 300+ sequences (phrases, sentences)
 - **Annotations**: Hand keypoints, emotion labels, text translations
 - **Variations**: Different signers, lighting, backgrounds
+- **Feature Format**: Cached MediaPipe landmarks (126-dim hands + face + pose)
+- **Storage**: Preprocessed features in `.pkl` format
 
 ### Emotion-Labeled Data
 - **Facial Expressions**: 1000+ samples per emotion category
@@ -146,54 +164,57 @@ Sinhala Speech Output
 - **Emotional Speech**: Samples with different emotional tones
 - **Prosody Annotations**: Pitch, duration, emphasis markers
 
+
 ## 🚀 Installation and Setup
 
 ### Prerequisites
 ```bash
 Python 3.8+
-TensorFlow Lite 2.x
-MediaPipe 0.10+
-Pyttsx3 or Google TTS
-React Native
-OpenCV
+PyTorch 2.7.1+cu118 (with CUDA 11.8 support)
+MediaPipe 0.10.31
+TensorFlow >= 2.20.0 (MediaPipe dependency)
+TensorFlow Lite 2.x (for mobile deployment)
+OpenCV >= 4.8.0
+numpy, tqdm, scikit-learn
+React Native (for mobile app)
+Pyttsx3 or Google TTS (for speech synthesis)
+NVIDIA GPU with CUDA 11.8 (recommended for training)
 ```
 
 ### Installation Steps
 
-1. **Clone the component**
+1. **Clone the repository**
 ```bash
 cd components/ssl-reader
 ```
 
-2. **Install Python dependencies**
+2. **Create Python virtual environment**
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
+```
+
+3. **Install PyTorch with CUDA support**
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+4. **Install dependencies**
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **Install MediaPipe**
+5. **Verify GPU availability**
 ```bash
-pip install mediapipe
+python check_gpu.py
 ```
 
-4. **Install mobile dependencies**
+6. **Download MediaPipe hand model** (automatic on first run)
 ```bash
-npm install
-react-native link react-native-camera
-react-native link react-native-tts
-```
-
-5. **Download models**
-```bash
-python scripts/download_models.py
-```
-
-6. **Set up TTS engine**
-```bash
-# For Android
-npm install react-native-tts
-
-# For iOS (additional setup in Xcode)
-cd ios && pod install
+python src/preprocessing_mediapipe.py --help
 ```
 
 ### Configuration
@@ -222,101 +243,17 @@ Edit `config/settings.json`:
 }
 ```
 
-## 💻 Usage
-
-### Basic Sign Recognition
-
-```python
-from src.recognizer import MultimodalSignRecognizer
-from src.emotion import EmotionDetector
-from src.tts import EmotionAwareTTS
-
-# Initialize components
-recognizer = MultimodalSignRecognizer(
-    model_path='models/sign_classifier.tflite'
-)
-emotion_detector = EmotionDetector(
-    model_path='models/emotion_classifier.tflite'
-)
-tts_engine = EmotionAwareTTS(language='si-LK')
-
-# Process video frame
-result = recognizer.process_frame(frame)
-
-if result['confidence'] > 0.7:
-    # Detect emotion
-    emotion = emotion_detector.detect(result['face_landmarks'])
-    
-    # Generate speech with emotion
-    text = result['sign_text']
-    speech_params = tts_engine.generate_params(
-        text=text,
-        emotion=emotion['class'],
-        intensity=emotion['intensity']
-    )
-    
-    # Speak with emotion
-    tts_engine.speak(text, params=speech_params)
-    
-    print(f"Sign: {text}, Emotion: {emotion['class']}")
+**Training Settings** (command-line arguments):
+```bash
+--model_type lstm        # or 'hybrid'
+--hidden_dim 512         # LSTM hidden units
+--num_layers 3           # LSTM layers
+--batch_size 16          # Training batch size
+--num_epochs 200         # Maximum epochs
+--patience 30            # Early stopping patience
+--learning_rate 0.001    # Initial learning rate
+--device cuda            # Use GPU
 ```
-
-### Real-Time Video Processing
-
-```python
-from src.video_processor import RealtimeSSLProcessor
-
-processor = RealtimeSSLProcessor(
-    camera_index=0,
-    display_landmarks=True
-)
-
-# Start processing
-processor.start()
-
-while processor.is_running():
-    # Get current recognition result
-    result = processor.get_latest_result()
-    
-    if result:
-        print(f"Recognized: {result['text']}")
-        print(f"Emotion: {result['emotion']}")
-        print(f"Confidence: {result['confidence']:.2f}")
-```
-
-### Training Custom Models
-
-```python
-from src.training import SignClassifierTrainer
-from src.data_loader import SSLVideoDataset
-
-# Load dataset
-dataset = SSLVideoDataset(
-    video_dir='datasets/ssl_videos',
-    annotations='datasets/annotations.json'
-)
-
-# Initialize trainer
-trainer = SignClassifierTrainer(
-    model_architecture='lstm_attention',
-    num_classes=500
-)
-
-# Train model
-history = trainer.train(
-    dataset=dataset,
-    epochs=100,
-    batch_size=32,
-    validation_split=0.2
-)
-
-# Export to TFLite for mobile
-trainer.export_tflite('models/sign_classifier.tflite')
-```
-
-## 📱 Mobile Integration
-
-### React Native Example
 
 ```javascript
 import { SSLReader } from './src/native-modules';
@@ -364,11 +301,6 @@ const SSLReaderComponent = () => {
 - **Temporal Accuracy**: Sequence-level correctness
 - **Multi-Modal Fusion**: Improvement from combining modalities
 
-### Speech Quality
-- **Naturalness**: Mean Opinion Score (MOS)
-- **Emotion Appropriateness**: User ratings on emotion-speech match
-- **Intelligibility**: Word recognition rate
-- **Prosody Quality**: Pitch and rhythm naturalness
 
 ### System Performance
 - **Latency**: Time from sign to speech output
@@ -382,29 +314,6 @@ const SSLReaderComponent = () => {
 - **Ease of Use**: Learning curve and usability
 - **Cultural Appropriateness**: SSL and Sinhala cultural fit
 
-## 🎨 Emotion-to-Speech Mapping
-
-### Speech Parameter Adjustments
-
-| Emotion | Pitch | Rate | Volume | Emphasis | Example |
-|---------|-------|------|--------|----------|---------|
-| Happy | +20% | +10% | +5% | High | Cheerful, bright |
-| Sad | -20% | -15% | -10% | Low | Soft, gentle |
-| Angry | +15% | +5% | +15% | High | Intense, sharp |
-| Surprise | +25% | +20% | +10% | High | Excited, quick |
-| Fear | +10% | +15% | 0% | Medium | Tense, hurried |
-| Urgent | +10% | +25% | +10% | High | Fast, pressing |
-| Neutral | 0% | 0% | 0% | Medium | Normal speech |
-
-## 🔮 Future Enhancements
-
-- **Gesture Vocabulary Expansion**: Support for 1000+ signs
-- **Conversational Context**: Multi-turn dialogue understanding
-- **Person-Specific Adaptation**: Learn individual signing styles
-- **3D Hand Pose**: More accurate spatial understanding
-- **AR Visualization**: Overlay sign guidance in real-time
-- **Multi-Person Detection**: Recognize multiple signers
-- **Custom Voice Models**: Personalized TTS voices
 
 ## 🐛 Known Issues and Limitations
 
@@ -427,11 +336,6 @@ const SSLReaderComponent = () => {
 - Deep learning for emotion detection
 - Affective computing principles
 
-### Speech Synthesis
-- SSML (Speech Synthesis Markup Language)
-- Prosody modeling in TTS
-- Emotional speech synthesis
-
 ### Sign Language
 - Sinhala Sign Language linguistics
 - Non-manual features in sign languages
@@ -453,9 +357,37 @@ MIT License - See main project LICENSE file
 ## 👤 Developer
 
 **Liyanage M.L.I.S.** (IT22304674)
-- Email: [developer-email]
-- Focus: Computer Vision, Emotion Recognition, Speech Synthesis
+- Email: [mlisliyanage@gmail.com]
+- Focus: Computer Vision, Emotion Recognition
 
 ---
 
-**Component Status**: Active Development | **Version**: 0.1.0 | **Last Updated**: December 2025
+## 📂 Project Structure
+
+```
+ssl-reader/
+├── src/
+│   ├── preprocessing_mediapipe.py  # MediaPipe feature extraction
+│   ├── preprocess_mediapipe.py     # Batch preprocessing script
+│   ├── train_mediapipe.py          # Training script
+│   ├── dataset.py                  # PyTorch dataset loader
+│   ├── models.py                   # LSTM and Hybrid models
+│   └── preprocessing_simple.py     # Dataset splitting
+├── data/
+│   └── processed/
+│       └── mediapipe_full/         # Cached features (.pkl)
+├── models/
+│   └── mediapipe/
+│       ├── hand_landmarker.task    # MediaPipe model
+│       ├── checkpoint_best.pth     # Best trained model
+│       └── checkpoint_latest.pth   # Latest checkpoint
+├── logs/                           # Training logs
+├── datasets/                       # Video datasets
+├── requirements.txt                # Python dependencies
+├── check_gpu.py                    # GPU verification
+└── README.md                       # This file
+```
+
+---
+
+**Component Status**: Active Development | **Version**: 1.0.0 | **Last Updated**: January 2026
