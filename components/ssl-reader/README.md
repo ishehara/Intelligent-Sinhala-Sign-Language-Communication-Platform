@@ -2,17 +2,17 @@
 
 **Developer**: IT22304674 – Liyanage M.L.I.S.
 
-An intelligent SSL recognition system that integrates hand gestures, facial emotions, and body postures to provide natural, emotion-aware Sinhala speech synthesis with full on-device processing.
+An intelligent SSL recognition system that integrates hand gestures, facial emotions, and body postures with full on-device processing.
 
 ## 🎯 Overview
 
-Most SSL recognition systems focus solely on hand gestures, neglecting critical non-manual features like facial expressions and body postures that add meaning and emotional context to communication. This component provides **holistic sign recognition** with **emotion-aware speech synthesis**, operating entirely on-device for privacy and real-time performance.
+Most SSL recognition systems focus solely on hand gestures, neglecting critical non-manual features like facial expressions and body postures that add meaning and emotional context to communication. This component provides **holistic sign recognition** with **emotion detection**, operating entirely on-device for privacy and real-time performance.
 
 ## 🚨 Problem Statement
 
 **How can we design a smart SSL reader that:**
 1. Accurately decodes signs by integrating hand gestures, facial emotions, and body postures
-2. Synthesizes natural, emotion-aware Sinhala speech reflecting the signer's affective state
+2. Detects emotional context to provide richer understanding of sign communication
 3. Operates fully on-device for privacy, real-time performance, and culturally relevant communication
 
 ## ✨ Key Features
@@ -34,13 +34,7 @@ Most SSL recognition systems focus solely on hand gestures, neglecting critical 
 - **Cultural Adaptation**: SSL-specific emotional expressions
 - **Confidence Scoring**: Provides reliability metrics for predictions
 
-### 3. Emotion-Aware Speech Synthesis
-- **Expressive TTS**: Voice modulation based on detected emotion
-- **Natural Sinhala Voice**: High-quality, culturally appropriate speech
-- **Prosody Control**: Stress, intonation, and rhythm adaptation
-- **Non-Robotic Output**: Reduces mechanical speech patterns
-
-### 4. On-Device Processing
+### 3. On-Device Processing
 - **Full Privacy**: No data sent to cloud servers
 - **Low Latency**: <500ms from sign to speech
 - **Offline Capable**: Works without internet connection
@@ -67,9 +61,7 @@ Temporal Modeling (LSTM/Transformer)
          ↓
 Sign Classification + Emotion Recognition
          ↓
-Emotion-Aware TTS Generation
-         ↓
-Sinhala Speech Output
+Sign Output + Emotion Context
 ```
 
 ### Machine Learning Models
@@ -108,7 +100,7 @@ Sinhala Speech Output
 ┌─────────────────────────────────────────┐
 │         Mobile Application UI           │
 ├─────────────────────────────────────────┤
-│  Camera View  │  Text Display  │ Audio  │
+│  Camera View  │  Sign Display  │ Emotion│
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────┴───────────────────────┐
@@ -123,13 +115,6 @@ Sinhala Speech Output
 ├─────────────────────────────────────────┤
 │  Expression Detector │ Intensity Est.   │
 │  Context Classifier  │ Emotion Mapper   │
-└─────────────────┬───────────────────────┘
-                  │
-┌─────────────────┴───────────────────────┐
-│      Emotion-Aware TTS Engine           │
-├─────────────────────────────────────────┤
-│  Text Generation  │  SSML Generator     │
-│  Voice Synthesis  │  Prosody Control    │
 └─────────────────────────────────────────┘
 ```
 
@@ -150,7 +135,6 @@ Sinhala Speech Output
 - **Static Signs**: 500+ unique signs × 20 samples each
 - **Dynamic Signs**: 300+ sequences (phrases, sentences)
 - **Annotations**: Hand keypoints, emotion labels, text translations
-- **Variations**: Different signers, lighting, backgrounds
 - **Feature Format**: Cached MediaPipe landmarks (126-dim hands + face + pose)
 - **Storage**: Preprocessed features in `.pkl` format
 
@@ -158,11 +142,6 @@ Sinhala Speech Output
 - **Facial Expressions**: 1000+ samples per emotion category
 - **In-Context Emotions**: SSL-specific emotional expressions
 - **Intensity Labels**: Low, medium, high emotion intensity
-
-### Speech Synthesis Data
-- **Sinhala Voice Corpus**: Native speaker recordings
-- **Emotional Speech**: Samples with different emotional tones
-- **Prosody Annotations**: Pitch, duration, emphasis markers
 
 
 ## 🚀 Installation and Setup
@@ -177,7 +156,6 @@ TensorFlow Lite 2.x (for mobile deployment)
 OpenCV >= 4.8.0
 numpy, tqdm, scikit-learn
 React Native (for mobile app)
-Pyttsx3 or Google TTS (for speech synthesis)
 NVIDIA GPU with CUDA 11.8 (recommended for training)
 ```
 
@@ -234,11 +212,6 @@ Edit `config/settings.json`:
   "emotion": {
     "detection_frequency": 5,
     "intensity_threshold": 0.6
-  },
-  "tts": {
-    "language": "si-LK",
-    "speech_rate": 1.0,
-    "pitch": 1.0
   }
 }
 ```
@@ -255,44 +228,6 @@ Edit `config/settings.json`:
 --device cuda            # Use GPU
 ```
 
-```javascript
-import { SSLReader } from './src/native-modules';
-
-const SSLReaderComponent = () => {
-  const [recognizedText, setRecognizedText] = useState('');
-  const [emotion, setEmotion] = useState('neutral');
-
-  useEffect(() => {
-    SSLReader.initialize({
-      enableEmotionDetection: true,
-      enableOnDeviceProcessing: true
-    });
-
-    SSLReader.addEventListener('signRecognized', (event) => {
-      setRecognizedText(event.text);
-      setEmotion(event.emotion);
-      
-      // Trigger TTS with emotion
-      SSLReader.speakWithEmotion(
-        event.text,
-        event.emotion,
-        event.intensity
-      );
-    });
-
-    return () => SSLReader.cleanup();
-  }, []);
-
-  return (
-    <View>
-      <CameraView />
-      <Text>Recognized: {recognizedText}</Text>
-      <EmotionIndicator emotion={emotion} />
-    </View>
-  );
-};
-```
-
 ## 📈 Evaluation Metrics
 
 ### Recognition Performance
@@ -303,7 +238,7 @@ const SSLReaderComponent = () => {
 
 
 ### System Performance
-- **Latency**: Time from sign to speech output
+- **Latency**: End-to-end processing time
 - **FPS**: Camera processing frame rate
 - **Battery Usage**: Power consumption per hour
 - **Model Size**: On-device storage requirements
@@ -321,7 +256,6 @@ const SSLReaderComponent = () => {
 - May struggle with rapid or complex finger movements
 - Emotion detection less accurate with partial face visibility
 - Limited to pre-trained sign vocabulary
-- TTS quality varies with emotion intensity extremes
 - Performance varies across device capabilities
 
 ## 📚 References
@@ -346,13 +280,9 @@ const SSLReaderComponent = () => {
 Contributions welcome in:
 - Sign language dataset expansion
 - Emotion recognition improvements
-- TTS quality enhancements
 - Model optimization for mobile
 - Cultural validation and testing
 
-## 📝 License
-
-MIT License - See main project LICENSE file
 
 ## 👤 Developer
 
