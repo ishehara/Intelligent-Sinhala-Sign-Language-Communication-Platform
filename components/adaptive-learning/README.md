@@ -36,9 +36,7 @@ Traditional SSL learning systems provide static lessons without adapting to indi
 - **Priority Ranking**: Focuses on signs most at risk of being forgotten
 
 ### 4. Holistic Sign Recognition
-- **Multi-modal Input**: Captures hands, body posture, and facial expressions
-- **Cultural Accuracy**: Recognizes SSL-specific movements and expressions
-- **Context Understanding**: Distinguishes between similar signs based on context
+- **Sign Input**: Captures hands
 - **Real-time Processing**: Provides immediate feedback during practice
 
 ## 🔬 Technical Approach
@@ -51,7 +49,6 @@ State Space:
 - Historical performance data
 - Time since last practice
 - Difficulty level preferences
-- Error patterns
 
 Action Space:
 - Select next sign to teach
@@ -102,8 +99,7 @@ Reward Function:
 ┌─────────────────┴───────────────────────┐
 │       Sign Recognition Module           │
 ├─────────────────────────────────────────┤
-│  Gesture Detection  │  Emotion Analysis │
-│  Body Pose  │  Validation Engine        │
+│  Gesture Detection | Validation Engine  |                         
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────┴───────────────────────┐
@@ -117,9 +113,9 @@ Reward Function:
 ## 📊 Dataset Requirements
 
 ### Sign Language Data
-- **SSL Video Database**: 500+ signs with multiple variations
+- **SSL Database**: Static and dyanamic sign data
 - **Annotations**: Hand keypoints, facial landmarks, body pose
-- **Metadata**: Difficulty level, common errors, cultural context
+- **Metadata**: Difficulty level, common errors
 
 ### User Data (Collected during usage)
 - Learning progress per sign
@@ -128,155 +124,12 @@ Reward Function:
 - Assessment scores
 - Retention test results
 
-## 🚀 Installation and Setup
-
-### Prerequisites
-```bash
-Python 3.8+
-TensorFlow 2.x or PyTorch 1.x
-OpenCV
-MediaPipe
-React Native
-```
-
-### Installation Steps
-
-1. **Clone the component**
-```bash
-cd components/adaptive-learning
-```
-
-2. **Install Python dependencies**
-```bash
-pip install -r requirements.txt
-```
-
-3. **Install mobile dependencies**
-```bash
-npm install
-```
-
-4. **Download pre-trained models**
-```bash
-python scripts/download_models.py
-```
-
-5. **Set up database**
-```bash
-python scripts/init_database.py
-```
-
-### Configuration
-
-Edit `config/settings.json`:
-```json
-{
-  "rl_agent": {
-    "algorithm": "DQN",
-    "learning_rate": 0.001,
-    "epsilon": 0.1
-  },
-  "recognition": {
-    "confidence_threshold": 0.85,
-    "fps": 30
-  },
-  "spaced_repetition": {
-    "initial_interval": 1,
-    "multiplier": 2.5
-  }
-}
-```
-
-## 💻 Usage
-
-### Training the RL Agent
-
-```python
-from src.rl_engine import AdaptiveLearningAgent
-from src.data_loader import UserDataLoader
-
-# Initialize agent
-agent = AdaptiveLearningAgent(
-    state_size=128,
-    action_size=100,  # Number of possible signs
-    learning_rate=0.001
-)
-
-# Load user data
-data_loader = UserDataLoader('data/user_profiles')
-
-# Train agent
-agent.train(
-    episodes=1000,
-    user_data=data_loader.get_training_data()
-)
-
-# Save trained model
-agent.save('models/rl_agent.h5')
-```
-
-### Running Sign Recognition
-
-```python
-from src.recognition import SignRecognizer
-
-recognizer = SignRecognizer(
-    model_path='models/sign_recognition.h5'
-)
-
-# Process video input
-result = recognizer.recognize_sign(video_frame)
-print(f"Detected: {result['sign']}, Confidence: {result['confidence']}")
-```
-
-### Implementing Adaptive Lesson
-
-```python
-from src.lesson_manager import AdaptiveLessonManager
-
-lesson_mgr = AdaptiveLessonManager(
-    user_id='user123',
-    rl_agent=agent
-)
-
-# Get next recommended sign
-next_sign = lesson_mgr.get_next_lesson()
-
-# Record practice session
-lesson_mgr.record_practice(
-    sign_id=next_sign,
-    success=True,
-    time_taken=45.5,
-    errors=['hand_angle']
-)
-
-# Check review schedule
-reviews = lesson_mgr.get_review_signs()
-```
-
-## 📈 Evaluation Metrics
-
-### Learning Effectiveness
-- **Retention Rate**: Percentage of signs remembered after 1 week, 1 month
-- **Learning Speed**: Time to mastery per sign
-- **Error Reduction**: Decrease in mistakes over time
-
-### System Performance
-- **Recognition Accuracy**: Precision, recall, F1-score
-- **RL Convergence**: Reward progression over episodes
-- **Adaptation Quality**: Learner satisfaction scores
-
-### User Experience
-- **Engagement**: Session duration, frequency
-- **Satisfaction**: SUS (System Usability Scale) scores
-- **Perceived Difficulty**: Self-reported challenge level
 
 ## 🔮 Future Enhancements
 
 - **Multi-user Learning**: Compare progress with peers
 - **Gamification**: Badges, leaderboards, challenges
 - **Advanced RL**: Multi-agent systems for collaborative learning
-- **AR Integration**: Augmented reality for immersive practice
 - **Voice Feedback**: Audio instructions and corrections
 - **Parent/Teacher Dashboard**: Monitor learner progress
 
