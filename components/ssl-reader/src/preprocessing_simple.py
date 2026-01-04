@@ -12,6 +12,13 @@ from typing import Dict, List, Tuple, Optional
 import logging
 import json
 
+try:
+    from augmentation import VideoAugmentation
+    HAS_AUGMENTATION = True
+except ImportError:
+    HAS_AUGMENTATION = False
+    logger.warning("Augmentation module not found, augmentation disabled")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -22,7 +29,8 @@ class VideoFeatureExtractor:
     def __init__(
         self,
         max_frames: int = 60,
-        frame_size: Tuple[int, int] = (224, 224)
+        frame_size: Tuple[int, int] = (224, 224),
+        use_augmentation: bool = False
     ):
         """
         Initialize simple feature extractor.
@@ -30,9 +38,13 @@ class VideoFeatureExtractor:
         Args:
             max_frames: Maximum number of frames to extract per video
             frame_size: Resize dimensions for each frame
+            use_augmentation: Whether to apply data augmentation
         """
         self.max_frames = max_frames
         self.frame_size = frame_size
+        self.use_augmentation = use_augmentation and HAS_AUGMENTATION
+        if use_augmentation and not HAS_AUGMENTATION:
+            logger.warning("Augmentation requested but not available")
         
     def extract_frame_features(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -143,6 +155,10 @@ class VideoFeatureExtractor:
                 
                 # Check if this is a frame we want to sample
                 if current_frame == frame_indices[next_sample_idx]:
+                    # Apply augmentation if enabled
+                    if self.use_augmentation:
+                        frame = VideoAugmentation.augment_frame(frame, training=True)
+                    
                     # Extract features from this frame
                     features = self.extract_frame_features(frame)
                     frames_data.append(features)
