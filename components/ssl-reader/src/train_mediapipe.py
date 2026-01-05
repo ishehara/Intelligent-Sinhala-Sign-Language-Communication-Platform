@@ -224,6 +224,8 @@ def main():
                        help='Use hand landmarks (default: True)')
     parser.add_argument('--use_pose', action='store_true', default=False,
                        help='Use pose landmarks (default: False - URL needs fixing)')
+    parser.add_argument('--use_face', action='store_true', default=True,
+                       help='Use facial landmarks and blendshapes for emotion detection (default: True)')
     parser.add_argument('--max_frames', type=int, default=60,
                        help='Maximum frames per video')
     
@@ -298,12 +300,14 @@ def main():
     feature_extractor = MediaPipeFeatureExtractor(
         max_frames=args.max_frames,
         use_hands=args.use_hands,
-        use_pose=args.use_pose
+        use_pose=args.use_pose,
+        use_face=args.use_face
     )
     
     feature_dim = feature_extractor.get_feature_dim()
     logger.info(f"Feature dimension: {feature_dim}")
     logger.info(f"  - Hands: {21*2*3 if args.use_hands else 0} dims (2 hands × 21 landmarks × 3 coords)")
+    logger.info(f"  - Face: {468*3 + 52 if args.use_face else 0} dims (468 landmarks × 3 coords + 52 blendshapes)")
     logger.info(f"  - Pose: {33*3 if args.use_pose else 0} dims (33 landmarks × 3 coords)")
     
     # Create dataset splits

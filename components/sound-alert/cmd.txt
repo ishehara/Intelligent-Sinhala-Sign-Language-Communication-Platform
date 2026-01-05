@@ -1,0 +1,2 @@
+venv\Scripts\activate.bat
+python components\sound-alert\src\realtime_detection.py --model_dir "components/sound-alert/models/vehicle_horns_cnn" --data_dir "components/sound-alert/data/processed/vehicle_horns" --mode interactive --show_all
