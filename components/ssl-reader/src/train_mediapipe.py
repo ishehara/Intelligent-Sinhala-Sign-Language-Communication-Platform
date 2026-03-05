@@ -15,7 +15,7 @@ from datetime import datetime
 
 from preprocessing_mediapipe import MediaPipeFeatureExtractor, create_dataset_splits
 from dataset import SinhalaSignLanguageDataset
-from models import MultimodalLSTMModel, MultimodalTransformerModel, HybridModel
+from models import MultimodalLSTMModel, MultimodalTransformerModel, HybridModel, MultiStreamFusionModel
 
 # TensorBoard is optional
 try:
@@ -70,13 +70,20 @@ class MediaPipeTrainer:
             
             optimizer.zero_grad()
             outputs = self.model(features)
-            loss = criterion(outputs, labels)
+            
+            # Handle multi-stream model output (logits, attention_weights)
+            if isinstance(outputs, tuple):
+                logits, attention_weights = outputs
+            else:
+                logits = outputs
+            
+            loss = criterion(logits, labels)
             
             loss.backward()
             optimizer.step()
             
             total_loss += loss.item()
-            _, predicted = outputs.max(1)
+            _, predicted = logits.max(1)
             total += labels.size(0)
             correct += predicted.eq(labels).sum().item()
         
@@ -98,10 +105,17 @@ class MediaPipeTrainer:
                 labels = labels.to(self.device)
                 
                 outputs = self.model(features)
-                loss = criterion(outputs, labels)
+                
+                # Handle multi-stream model output (logits, attention_weights)
+                if isinstance(outputs, tuple):
+                    logits, attention_weights = outputs
+                else:
+                    logits = outputs
+                
+                loss = criterion(logits, labels)
                 
                 total_loss += loss.item()
-                _, predicted = outputs.max(1)
+                _, predicted = logits.max(1)
                 total += labels.size(0)
                 correct += predicted.eq(labels).sum().item()
         
@@ -116,10 +130,16 @@ class MediaPipeTrainer:
         val_loader,
         num_epochs: int,
         learning_rate: float = 0.001,
-        patience: int = 10
+        patience: int = 10,
+        weight_decay: float = 1e-4  # L2 regularization to fight memorization
     ):
         """Full training loop with early stopping."""
-        optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        # AGGRESSIVE REGULARIZATION for data starvation (11 videos/class)
+        optimizer = optim.Adam(
+            self.model.parameters(), 
+            lr=learning_rate,
+            weight_decay=weight_decay  # L2 penalty keeps weights small
+        )
         criterion = nn.CrossEntropyLoss()
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max', factor=0.5, patience=5
@@ -222,16 +242,18 @@ def main():
     # MediaPipe arguments
     parser.add_argument('--use_hands', action='store_true', default=True,
                        help='Use hand landmarks (default: True)')
-    parser.add_argument('--use_pose', action='store_true', default=False,
-                       help='Use pose landmarks (default: False - URL needs fixing)')
+    parser.add_argument('--use_pose', action='store_true', default=True,
+                       help='Use pose landmarks for body context (default: True)')
     parser.add_argument('--use_face', action='store_true', default=True,
                        help='Use facial landmarks and blendshapes for emotion detection (default: True)')
+    parser.add_argument('--use_filtered_face', action='store_true', default=True,
+                       help='Use only key facial landmarks (60 instead of 468) to reduce dimensions (default: True)')
     parser.add_argument('--max_frames', type=int, default=60,
                        help='Maximum frames per video')
     
     # Model arguments
     parser.add_argument('--model_type', type=str, default='lstm',
-                       choices=['lstm', 'transformer', 'hybrid'],
+                       choices=['lstm', 'transformer', 'hybrid', 'multistream'],
                        help='Model architecture')
     parser.add_argument('--hidden_dim', type=int, default=256,
                        help='Hidden dimension size')
@@ -245,6 +267,8 @@ def main():
                        help='Number of epochs')
     parser.add_argument('--learning_rate', type=float, default=0.001,
                        help='Learning rate')
+    parser.add_argument('--weight_decay', type=float, default=1e-4,
+                       help='Weight decay (L2 regularization) to prevent memorization (default: 1e-4)')
     parser.add_argument('--patience', type=int, default=15,
                        help='Early stopping patience')
     parser.add_argument('--augment', action='store_true', default=True,
@@ -306,13 +330,20 @@ def main():
         max_frames=args.max_frames,
         use_hands=args.use_hands,
         use_pose=args.use_pose,
-        use_face=args.use_face
+        use_face=args.use_face,
+        use_filtered_face=args.use_filtered_face
     )
     
     feature_dim = feature_extractor.get_feature_dim()
     logger.info(f"Feature dimension: {feature_dim}")
     logger.info(f"  - Hands: {21*2*3 if args.use_hands else 0} dims (2 hands × 21 landmarks × 3 coords)")
-    logger.info(f"  - Face: {468*3 + 52 if args.use_face else 0} dims (468 landmarks × 3 coords + 52 blendshapes)")
+    face_dim = 0
+    if args.use_face:
+        if args.use_filtered_face:
+            face_dim = 60*3 + 52  # 232 dims (60 key landmarks × 3 + 52 blendshapes)
+        else:
+            face_dim = 468*3 + 52  # 1456 dims (468 landmarks × 3 + 52 blendshapes)
+    logger.info(f"  - Face: {face_dim} dims ({'filtered: 60 key landmarks' if args.use_filtered_face and args.use_face else '468 landmarks'} × 3 coords + 52 blendshapes)")
     logger.info(f"  - Pose: {33*3 if args.use_pose else 0} dims (33 landmarks × 3 coords)")
     
     # Create dataset splits
@@ -329,25 +360,51 @@ def main():
     logger.info(f"Test samples: {len(splits['test'])}")
     
     # Create datasets
-    # Note: SinhalaSignLanguageDataset expects (samples, label_to_idx, feature_extractor, cache_dir, use_cache, training, augment)
+    # Note: SinhalaSignLanguageDataset expects (samples, label_to_idx, feature_extractor, cache_dir, use_cache, training, augment, augmentation_mode)
     # use_cache=False when preprocessing to force re-extraction
     use_cache = not args.preprocess
+    
+    # Use stream-specific augmentation for multistream model
+    augmentation_mode = 'stream_specific' if args.model_type == 'multistream' else 'unified'
+    
+    # Calculate actual dimensions for augmenter
+    hand_dim_val = 21*2*3 if args.use_hands else 0  # 126
+    pose_dim_val = 33*3 if args.use_pose else 0     # 99
+    face_dim_val = 0
+    if args.use_face:
+        if args.use_filtered_face:
+            face_dim_val = 60*3 + 52  # 232 (filtered)
+        else:
+            face_dim_val = 468*3 + 52  # 1456 (full)
     
     train_dataset = SinhalaSignLanguageDataset(
         splits['train'], label_map, feature_extractor, cache_dir, 
         use_cache=use_cache,
         training=True,  # Enable augmentation for training
-        augment=args.augment
+        augment=args.augment,
+        augmentation_mode=augmentation_mode,
+        hand_dim=hand_dim_val,
+        face_dim=face_dim_val,
+        pose_dim=pose_dim_val,
+        use_pose=args.use_pose
     )
     val_dataset = SinhalaSignLanguageDataset(
         splits['val'], label_map, feature_extractor, cache_dir,
         use_cache=use_cache,
-        training=False  # No augmentation for validation
+        training=False,  # No augmentation for validation
+        hand_dim=hand_dim_val,
+        face_dim=face_dim_val,
+        pose_dim=pose_dim_val,
+        use_pose=args.use_pose
     )
     test_dataset = SinhalaSignLanguageDataset(
         splits['test'], label_map, feature_extractor, cache_dir,
         use_cache=use_cache,
-        training=False  # No augmentation for testing
+        training=False,  # No augmentation for testing
+        hand_dim=hand_dim_val,
+        face_dim=face_dim_val,
+        pose_dim=pose_dim_val,
+        use_pose=args.use_pose
     )
     
     # Create dataloaders
@@ -379,13 +436,36 @@ def main():
             num_classes=num_classes,
             max_seq_len=args.max_frames
         )
-    else:  # hybrid
+    elif args.model_type == 'hybrid':
         model = HybridModel(
             input_dim=feature_dim,
             hidden_dim=args.hidden_dim,
             num_lstm_layers=args.num_layers,
             num_transformer_layers=args.num_layers,
             num_classes=num_classes
+        )
+    else:  # multistream
+        # Calculate actual dimensions based on configuration
+        hand_dim_val = 21*2*3 if args.use_hands else 0  # 126
+        pose_dim_val = 33*3 if args.use_pose else 0     # 99
+        face_dim_val = 0
+        if args.use_face:
+            if args.use_filtered_face:
+                face_dim_val = 60*3 + 52  # 232 (filtered)
+            else:
+                face_dim_val = 468*3 + 52  # 1456 (full)
+        
+        model = MultiStreamFusionModel(
+            hand_dim=hand_dim_val,
+            face_dim=face_dim_val,
+            pose_dim=pose_dim_val,
+            num_classes=num_classes,
+            hand_hidden=128,
+            face_hidden=256,
+            pose_hidden=128,
+            fusion_dim=512,
+            dropout=0.3,
+            use_pose=args.use_pose
         )
     
     total_params = sum(p.numel() for p in model.parameters())
@@ -399,6 +479,7 @@ def main():
         train_loader, val_loader,
         num_epochs=args.num_epochs,
         learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
         patience=args.patience
     )
     

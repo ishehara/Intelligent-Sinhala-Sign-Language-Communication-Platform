@@ -15,7 +15,7 @@ import logging
 from tqdm import tqdm
 
 from preprocessing_simple import VideoFeatureExtractor
-from augmentation import SkeletonAugmenter
+from augmentation import SkeletonAugmenter, StreamSpecificAugmenter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,7 +32,12 @@ class SinhalaSignLanguageDataset(Dataset):
         cache_dir: Optional[str] = None,
         use_cache: bool = True,
         training: bool = False,
-        augment: bool = True
+        augment: bool = True,
+        augmentation_mode: str = 'unified',
+        hand_dim: int = 126,
+        face_dim: int = 232,
+        pose_dim: int = 99,
+        use_pose: bool = True
     ):
         """
         Initialize the dataset.
@@ -45,6 +50,11 @@ class SinhalaSignLanguageDataset(Dataset):
             use_cache: Whether to use cached features
             training: Whether this is training dataset (enables augmentation)
             augment: Whether to apply augmentation (only if training=True)
+            augmentation_mode: 'unified' or 'stream_specific' augmentation
+            hand_dim: Dimension of hand features (default: 126)
+            face_dim: Dimension of face features (default: 232 for filtered)
+            pose_dim: Dimension of pose features (default: 99)
+            use_pose: Whether pose features are enabled (default: True)
         """
         self.samples = samples
         self.label_to_idx = label_to_idx
@@ -55,14 +65,25 @@ class SinhalaSignLanguageDataset(Dataset):
         # Initialize augmenter for training only
         self.augmenter = None
         if training and augment:
-            self.augmenter = SkeletonAugmenter(
-                rotation_range=(-5.0, 5.0),
-                scale_range=(0.9, 1.1),
-                noise_std=0.002,
-                temporal_shift_prob=0.3,
-                apply_prob=0.8
-            )
-            logger.info("✓ Augmentation enabled for training")
+            if augmentation_mode == 'stream_specific':
+                # Stream-specific augmentation (for multi-stream models)
+                self.augmenter = StreamSpecificAugmenter(
+                    hand_dim=hand_dim,
+                    face_dim=face_dim,
+                    pose_dim=pose_dim,
+                    use_pose=use_pose
+                )
+                logger.info("✓ Stream-specific augmentation enabled for training")
+            else:
+                # Unified augmentation (for single-stream models)
+                self.augmenter = SkeletonAugmenter(
+                    rotation_range=(-5.0, 5.0),
+                    scale_range=(0.9, 1.1),
+                    noise_std=0.002,
+                    temporal_shift_prob=0.3,
+                    apply_prob=0.8
+                )
+                logger.info("✓ Unified augmentation enabled for training")
         
         if cache_dir:
             self.cache_dir = Path(cache_dir)
