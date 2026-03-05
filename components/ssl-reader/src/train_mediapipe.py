@@ -247,6 +247,10 @@ def main():
                        help='Learning rate')
     parser.add_argument('--patience', type=int, default=15,
                        help='Early stopping patience')
+    parser.add_argument('--augment', action='store_true', default=True,
+                       help='Enable data augmentation for training (default: True)')
+    parser.add_argument('--no_augment', action='store_false', dest='augment',
+                       help='Disable data augmentation')
     
     # Device arguments
     parser.add_argument('--device', type=str, default='cuda',
@@ -294,6 +298,7 @@ def main():
     # Setup device
     device = torch.device(args.device if torch.cuda.is_available() and args.device == 'cuda' else 'cpu')
     logger.info(f"Using device: {device}")
+    logger.info(f"Data augmentation: {'Enabled' if args.augment else 'Disabled'}")
     
     # Initialize MediaPipe feature extractor
     logger.info("Initializing MediaPipe feature extractor...")
@@ -324,21 +329,25 @@ def main():
     logger.info(f"Test samples: {len(splits['test'])}")
     
     # Create datasets
-    # Note: SinhalaSignLanguageDataset expects (samples, label_to_idx, feature_extractor, cache_dir, use_cache)
+    # Note: SinhalaSignLanguageDataset expects (samples, label_to_idx, feature_extractor, cache_dir, use_cache, training, augment)
     # use_cache=False when preprocessing to force re-extraction
     use_cache = not args.preprocess
     
     train_dataset = SinhalaSignLanguageDataset(
         splits['train'], label_map, feature_extractor, cache_dir, 
-        use_cache=use_cache
+        use_cache=use_cache,
+        training=True,  # Enable augmentation for training
+        augment=args.augment
     )
     val_dataset = SinhalaSignLanguageDataset(
         splits['val'], label_map, feature_extractor, cache_dir,
-        use_cache=use_cache
+        use_cache=use_cache,
+        training=False  # No augmentation for validation
     )
     test_dataset = SinhalaSignLanguageDataset(
         splits['test'], label_map, feature_extractor, cache_dir,
-        use_cache=use_cache
+        use_cache=use_cache,
+        training=False  # No augmentation for testing
     )
     
     # Create dataloaders

@@ -15,6 +15,7 @@ import logging
 from tqdm import tqdm
 
 from preprocessing_simple import VideoFeatureExtractor
+from augmentation import SkeletonAugmenter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,7 +30,9 @@ class SinhalaSignLanguageDataset(Dataset):
         label_to_idx: Dict[str, int],
         feature_extractor: VideoFeatureExtractor,
         cache_dir: Optional[str] = None,
-        use_cache: bool = True
+        use_cache: bool = True,
+        training: bool = False,
+        augment: bool = True
     ):
         """
         Initialize the dataset.
@@ -40,11 +43,26 @@ class SinhalaSignLanguageDataset(Dataset):
             feature_extractor: VideoFeatureExtractor instance
             cache_dir: Directory to cache preprocessed features
             use_cache: Whether to use cached features
+            training: Whether this is training dataset (enables augmentation)
+            augment: Whether to apply augmentation (only if training=True)
         """
         self.samples = samples
         self.label_to_idx = label_to_idx
         self.feature_extractor = feature_extractor
         self.use_cache = use_cache
+        self.training = training
+        
+        # Initialize augmenter for training only
+        self.augmenter = None
+        if training and augment:
+            self.augmenter = SkeletonAugmenter(
+                rotation_range=(-5.0, 5.0),
+                scale_range=(0.9, 1.1),
+                noise_std=0.002,
+                temporal_shift_prob=0.3,
+                apply_prob=0.8
+            )
+            logger.info("✓ Augmentation enabled for training")
         
         if cache_dir:
             self.cache_dir = Path(cache_dir)
@@ -113,6 +131,11 @@ class SinhalaSignLanguageDataset(Dataset):
         
         # Convert to tensors
         features_tensor = torch.FloatTensor(features)
+        
+        # Apply augmentation if training
+        if self.augmenter is not None:
+            features_tensor = self.augmenter(features_tensor)
+        
         label_tensor = torch.LongTensor([label_idx])
         
         return features_tensor, label_tensor.squeeze()
