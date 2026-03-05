@@ -38,15 +38,16 @@ class MediaPipeFeatureExtractor:
     
     # Model URLs for MediaPipe tasks
     HAND_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-    POSE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker/float16/latest/pose_landmarker.task"
+    POSE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task"
     FACE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
     
     def __init__(
         self,
         max_frames: int = 60,
         use_hands: bool = True,
-        use_pose: bool = False,  # Disabled by default - pose model URL needs update
+        use_pose: bool = True,  # Now enabled for body context
         use_face: bool = True,  # Enable facial expression capture
+        use_filtered_face: bool = True,  # Use only key facial landmarks (reduces dims)
         model_dir: str = None
     ):
         """
@@ -66,6 +67,29 @@ class MediaPipeFeatureExtractor:
         self.use_hands = use_hands
         self.use_pose = use_pose
         self.use_face = use_face
+        self.use_filtered_face = use_filtered_face
+        
+        # Key facial landmark indices for emotion/expression (reduces 468 → ~60 landmarks)
+        # Eyes: 33,133,160,144,153,157 (left), 362,263,387,373,380,386 (right)
+        # Eyebrows: 70,63,105,66,107 (left), 336,296,334,293,300 (right)
+        # Mouth: 61,185,40,39,37,0,267,269,270,409,291 (key outline + corners)
+        # Nose: 1,2,98,327 (bridge + tip)
+        # Face oval: 10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109
+        self.key_face_indices = [
+            # Eyes (12 landmarks) - critical for gaze and emotion
+            33, 133, 160, 144, 153, 157,  # Left eye
+            362, 263, 387, 373, 380, 386,  # Right eye
+            # Eyebrows (10 landmarks) - critical for expression
+            70, 63, 105, 66, 107,  # Left eyebrow
+            336, 296, 334, 293, 300,  # Right eyebrow
+            # Mouth (14 landmarks) - critical for speech/emotion
+            61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 146, 91, 181,
+            # Nose (4 landmarks) - structural reference
+            1, 2, 98, 327,
+            # Face oval (20 landmarks) - structural context
+            10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 
+            361, 288, 397, 365, 379, 378, 400, 377, 152, 148
+        ]  # Total: 60 key landmarks
         
         # Setup model directory
         if model_dir is None:
@@ -209,7 +233,10 @@ class MediaPipeFeatureExtractor:
             except Exception as e:
                 logger.warning(f"Face detection failed: {e}")
                 # Use zeros if detection fails
-                features.append(np.zeros(468 * 3 + 52))  # 468 landmarks + 52 blendshapes
+                if self.use_filtered_face:
+                    features.append(np.zeros(len(self.key_face_indices) * 3 + 52))  # 60 landmarks + 52 blendshapes
+                else:
+                    features.append(np.zeros(468 * 3 + 52))  # 468 landmarks + 52 blendshapes
         
         # Combine all features
         return np.concatenate(features) if features else np.zeros(1)
@@ -242,23 +269,44 @@ class MediaPipeFeatureExtractor:
     
     def _process_face_landmarks(self, result) -> np.ndarray:
         """Process face landmark and blendshape results into feature vector."""
-        # Face has 468 landmarks with x, y, z coordinates + 52 blendshapes for emotion
-        face_features = np.zeros(468 * 3 + 52)
-        
-        if result.face_landmarks:
-            face_landmarks = result.face_landmarks[0]  # First face
+        if self.use_filtered_face:
+            # Use only key facial landmarks (60 × 3) + 52 blendshapes = 232 dims
+            face_features = np.zeros(len(self.key_face_indices) * 3 + 52)
             
-            # Extract 468 face landmarks
-            for lm_idx, landmark in enumerate(face_landmarks):
-                base_idx = lm_idx * 3
-                face_features[base_idx:base_idx + 3] = [landmark.x, landmark.y, landmark.z]
+            if result.face_landmarks:
+                face_landmarks = result.face_landmarks[0]  # First face
+                
+                # Extract only key face landmarks
+                for out_idx, lm_idx in enumerate(self.key_face_indices):
+                    if lm_idx < len(face_landmarks):
+                        landmark = face_landmarks[lm_idx]
+                        base_idx = out_idx * 3
+                        face_features[base_idx:base_idx + 3] = [landmark.x, landmark.y, landmark.z]
+                
+                # Extract blendshapes (facial expressions) - keep all 52
+                if result.face_blendshapes:
+                    blendshapes = result.face_blendshapes[0]
+                    for bs_idx, blendshape in enumerate(blendshapes):
+                        if bs_idx < 52:
+                            face_features[len(self.key_face_indices) * 3 + bs_idx] = blendshape.score
+        else:
+            # Use all 468 face landmarks + 52 blendshapes = 1456 dims (old behavior)
+            face_features = np.zeros(468 * 3 + 52)
             
-            # Extract blendshapes (facial expressions)
-            if result.face_blendshapes:
-                blendshapes = result.face_blendshapes[0]  # First face blendshapes
-                for bs_idx, blendshape in enumerate(blendshapes):
-                    if bs_idx < 52:  # MediaPipe has 52 blendshapes
-                        face_features[468 * 3 + bs_idx] = blendshape.score
+            if result.face_landmarks:
+                face_landmarks = result.face_landmarks[0]  # First face
+                
+                # Extract all 468 face landmarks
+                for lm_idx, landmark in enumerate(face_landmarks):
+                    base_idx = lm_idx * 3
+                    face_features[base_idx:base_idx + 3] = [landmark.x, landmark.y, landmark.z]
+                
+                # Extract blendshapes
+                if result.face_blendshapes:
+                    blendshapes = result.face_blendshapes[0]
+                    for bs_idx, blendshape in enumerate(blendshapes):
+                        if bs_idx < 52:
+                            face_features[468 * 3 + bs_idx] = blendshape.score
         
         return face_features
     
@@ -270,7 +318,10 @@ class MediaPipeFeatureExtractor:
         if self.use_pose:
             dim += 33 * 3  # 33 landmarks, 3 coords = 99
         if self.use_face:
-            dim += 468 * 3 + 52  # 468 landmarks (3 coords) + 52 blendshapes = 1456
+            if self.use_filtered_face:
+                dim += len(self.key_face_indices) * 3 + 52  # 60 key landmarks (3 coords) + 52 blendshapes = 232
+            else:
+                dim += 468 * 3 + 52  # 468 landmarks (3 coords) + 52 blendshapes = 1456
         return dim if dim > 0 else 1
     
     def process_video(self, video_path: str) -> Optional[np.ndarray]:

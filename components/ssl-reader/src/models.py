@@ -348,6 +348,284 @@ class HybridModel(nn.Module):
         return logits
 
 
+class TemporalConvBlock(nn.Module):
+    """Temporal Convolutional Block with residual connection."""
+    
+    def __init__(self, in_channels, out_channels, kernel_size, dilation, dropout=0.2):
+        super(TemporalConvBlock, self).__init__()
+        
+        padding = (kernel_size - 1) * dilation // 2
+        
+        self.conv1 = nn.Conv1d(
+            in_channels, out_channels, kernel_size,
+            padding=padding, dilation=dilation
+        )
+        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+        
+        self.conv2 = nn.Conv1d(
+            out_channels, out_channels, kernel_size,
+            padding=padding, dilation=dilation
+        )
+        self.bn2 = nn.BatchNorm1d(out_channels)
+        
+        # Residual connection
+        self.residual = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
+    
+    def forward(self, x):
+        """Forward pass with residual connection."""
+        residual = x if self.residual is None else self.residual(x)
+        
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.dropout(out)
+        
+        out = self.conv2(out)
+        out = self.bn2(out)
+        
+        out = out + residual
+        out = self.relu(out)
+        
+        return out
+
+
+class TemporalConvNet(nn.Module):
+    """Temporal Convolutional Network for sequence modeling."""
+    
+    def __init__(self, input_dim, hidden_dims=[64, 128, 128], kernel_size=5, dropout=0.2):
+        super(TemporalConvNet, self).__init__()
+        
+        layers = []
+        num_levels = len(hidden_dims)
+        
+        for i in range(num_levels):
+            in_channels = input_dim if i == 0 else hidden_dims[i-1]
+            out_channels = hidden_dims[i]
+            dilation = 2 ** i
+            
+            layers.append(TemporalConvBlock(
+                in_channels, out_channels, kernel_size, dilation, dropout
+            ))
+        
+        self.network = nn.Sequential(*layers)
+        self.output_dim = hidden_dims[-1]
+    
+    def forward(self, x):
+        """
+        Forward pass.
+        Args:
+            x: (batch, seq_len, input_dim)
+        Returns:
+            (batch, output_dim)
+        """
+        # Conv1D expects (batch, channels, seq_len)
+        x = x.transpose(1, 2)  # (batch, input_dim, seq_len)
+        x = self.network(x)     # (batch, output_dim, seq_len)
+        
+        # Global average pooling
+        x = x.mean(dim=2)       # (batch, output_dim)
+        
+        return x
+
+
+class AttentionFusion(nn.Module):
+    """Attention-based fusion for multi-stream features."""
+    
+    def __init__(self, stream_dims, fusion_dim=512, dropout=0.3):
+        super(AttentionFusion, self).__init__()
+        
+        self.num_streams = len(stream_dims)
+        
+        # Project each stream to fusion dimension
+        self.stream_projections = nn.ModuleList([
+            nn.Linear(dim, fusion_dim) for dim in stream_dims
+        ])
+        
+        # Attention weights for each stream
+        self.attention = nn.Sequential(
+            nn.Linear(fusion_dim, fusion_dim // 2),
+            nn.Tanh(),
+            nn.Linear(fusion_dim // 2, 1)
+        )
+        
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(fusion_dim)
+    
+    def forward(self, stream_features):
+        """
+        Args:
+            stream_features: List of tensors [(batch, dim1), (batch, dim2), ...]
+        Returns:
+            fused: (batch, fusion_dim)
+            attention_weights: (batch, num_streams)
+        """
+        batch_size = stream_features[0].size(0)
+        
+        # Project all streams
+        projected = []
+        for i, features in enumerate(stream_features):
+            proj = self.stream_projections[i](features)  # (batch, fusion_dim)
+            projected.append(proj)
+        
+        # Stack streams
+        stacked = torch.stack(projected, dim=1)  # (batch, num_streams, fusion_dim)
+        
+        # Compute attention weights for each stream
+        attn_scores = self.attention(stacked).squeeze(-1)  # (batch, num_streams)
+        attn_weights = F.softmax(attn_scores, dim=1)  # (batch, num_streams)
+        
+        # Weighted combination
+        attn_weights_expanded = attn_weights.unsqueeze(-1)  # (batch, num_streams, 1)
+        fused = torch.sum(stacked * attn_weights_expanded, dim=1)  # (batch, fusion_dim)
+        
+        fused = self.layer_norm(fused)
+        fused = self.dropout(fused)
+        
+        return fused, attn_weights
+
+
+class MultiStreamFusionModel(nn.Module):
+    """
+    Multi-Stream Fusion Model for Sign Language Recognition.
+    Separate streams for hands, face, and optional pose.
+    
+    Architecture:
+        - Hand Stream: TCN (fast movements)
+        - Face Stream: TCN + Attention (expressions + landmarks)
+        - Pose Stream: Lightweight LSTM (optional)
+        - Fusion: Attention-based weighted combination
+    
+    Developer: IT22304674 – Liyanage M.L.I.S.
+    """
+    
+    def __init__(
+        self,
+        hand_dim: int = 126,
+        face_dim: int = 232,  # Updated default for filtered face
+        pose_dim: int = 99,   # Updated default with pose enabled
+        num_classes: int = 227,
+        hand_hidden: int = 128,
+        face_hidden: int = 256,
+        pose_hidden: int = 128,
+        fusion_dim: int = 512,
+        dropout: float = 0.5,  # INCREASED from 0.3 to fight memorization!
+        use_pose: bool = True  # Now enabled by default
+    ):
+        """
+        Initialize Multi-Stream model.
+        
+        Args:
+            hand_dim: Hand feature dimension (default: 126 for 2 hands)
+            face_dim: Face feature dimension (default: 232 for filtered face + blendshapes)
+            pose_dim: Pose feature dimension (default: 99 for body context)
+            num_classes: Number of sign classes
+            hand_hidden: Hand stream output dimension
+            face_hidden: Face stream output dimension
+            pose_hidden: Pose stream output dimension
+            fusion_dim: Fusion layer dimension
+            dropout: Dropout rate (AGGRESSIVE: 0.5 to combat data starvation)
+            use_pose: Whether to use pose stream (now True by default)
+        """
+        super(MultiStreamFusionModel, self).__init__()
+        
+        self.hand_dim = hand_dim
+        self.face_dim = face_dim
+        self.pose_dim = pose_dim
+        self.use_pose = use_pose
+        
+        # Hand Stream: TCN for fast hand movements
+        self.hand_stream = TemporalConvNet(
+            input_dim=hand_dim,
+            hidden_dims=[64, hand_hidden, hand_hidden],
+            kernel_size=5,
+            dropout=dropout
+        )
+        
+        # Face Stream: TCN + Attention for facial expressions
+        self.face_stream = TemporalConvNet(
+            input_dim=face_dim,
+            hidden_dims=[128, 256, face_hidden],
+            kernel_size=5,
+            dropout=dropout
+        )
+        
+        # Pose Stream: Lightweight LSTM (optional)
+        self.pose_stream = None
+        if use_pose and pose_dim > 0:
+            self.pose_stream = nn.LSTM(
+                input_size=pose_dim,
+                hidden_size=pose_hidden // 2,
+                num_layers=1,
+                batch_first=True,
+                bidirectional=True
+            )
+            self.pose_pooling = nn.AdaptiveAvgPool1d(1)
+        
+        # Attention Fusion
+        stream_dims = [hand_hidden, face_hidden]
+        if use_pose and pose_dim > 0:
+            stream_dims.append(pose_hidden)
+        
+        self.fusion = AttentionFusion(
+            stream_dims=stream_dims,
+            fusion_dim=fusion_dim,
+            dropout=dropout
+        )
+        
+        # Classifier with AGGRESSIVE dropout (fight data starvation!)
+        self.classifier = nn.Sequential(
+            nn.Linear(fusion_dim, fusion_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),  # First dropout
+            nn.Linear(fusion_dim // 2, fusion_dim // 4),
+            nn.ReLU(),
+            nn.Dropout(dropout * 0.8),  # Second dropout (slightly reduced)
+            nn.Linear(fusion_dim // 4, num_classes)
+        )
+    
+    def forward(self, x: torch.Tensor):
+        """
+        Forward pass.
+        
+        Args:
+            x: Input tensor of shape (batch, seq_len, total_features)
+               Features are concatenated: [hand_features, face_features, pose_features]
+        
+        Returns:
+            logits: (batch, num_classes)
+            attention_weights: (batch, num_streams) - stream importance
+        """
+        batch_size, seq_len, _ = x.shape
+        
+        # Split features into streams
+        hand_features = x[:, :, :self.hand_dim]  # (batch, seq_len, hand_dim)
+        face_features = x[:, :, self.hand_dim:self.hand_dim + self.face_dim]  # (batch, seq_len, face_dim)
+        
+        # Process each stream
+        hand_out = self.hand_stream(hand_features)  # (batch, hand_hidden)
+        face_out = self.face_stream(face_features)  # (batch, face_hidden)
+        
+        stream_features = [hand_out, face_out]
+        
+        # Process pose stream if enabled
+        if self.use_pose and self.pose_dim > 0:
+            pose_features = x[:, :, self.hand_dim + self.face_dim:]  # (batch, seq_len, pose_dim)
+            pose_out, _ = self.pose_stream(pose_features)  # (batch, seq_len, pose_hidden)
+            pose_out = pose_out.transpose(1, 2)  # (batch, pose_hidden, seq_len)
+            pose_out = self.pose_pooling(pose_out).squeeze(-1)  # (batch, pose_hidden)
+            stream_features.append(pose_out)
+        
+        # Fusion with attention
+        fused, attention_weights = self.fusion(stream_features)  # (batch, fusion_dim), (batch, num_streams)
+        
+        # Classification
+        logits = self.classifier(fused)  # (batch, num_classes)
+        
+        return logits, attention_weights
+
+
 def create_model(
     model_type: str,
     input_dim: int,
@@ -358,7 +636,7 @@ def create_model(
     Factory function to create models.
     
     Args:
-        model_type: Type of model ('lstm', 'transformer', or 'hybrid')
+        model_type: Type of model ('lstm', 'transformer', 'hybrid', or 'multistream')
         input_dim: Input feature dimension
         num_classes: Number of classes
         **kwargs: Additional arguments for the model
@@ -372,6 +650,8 @@ def create_model(
         return MultimodalTransformerModel(input_dim, num_classes=num_classes, **kwargs)
     elif model_type == 'hybrid':
         return HybridModel(input_dim, num_classes=num_classes, **kwargs)
+    elif model_type == 'multistream':
+        return MultiStreamFusionModel(num_classes=num_classes, **kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
