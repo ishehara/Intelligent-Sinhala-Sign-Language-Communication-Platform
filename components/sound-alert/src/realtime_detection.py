@@ -33,11 +33,15 @@ class RealtimeSoundDetector:
         with open(metadata_path, 'r') as f:
             self.metadata = json.load(f)
         
-        # Load label mapping
+        # Load label mapping (supports both old and new formats)
         with open(label_mapping_path, 'r') as f:
             label_info = json.load(f)
-            self.label_decoder = {int(k): v for k, v in label_info['decoder'].items()}
-            self.class_names = list(label_info['encoder'].keys())
+            if 'decoder' in label_info:
+                self.label_decoder = {int(k): v for k, v in label_info['decoder'].items()}
+                self.class_names = list(label_info['encoder'].keys())
+            elif 'label_to_class' in label_info:
+                self.label_decoder = {int(k): v for k, v in label_info['label_to_class'].items()}
+                self.class_names = list(label_info['class_to_label'].keys())
         
         self.n_mfcc = self.metadata['n_mfcc']
         self.n_frames = self.metadata['n_frames']
