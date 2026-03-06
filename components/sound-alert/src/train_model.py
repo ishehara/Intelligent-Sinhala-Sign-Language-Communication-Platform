@@ -370,7 +370,14 @@ def load_preprocessed_data(data_dir):
     print(f"y_train shape: {y_train.shape}")
     print(f"y_test shape: {y_test.shape}")
     print(f"Number of classes: {metadata['n_classes']}")
-    print(f"Classes: {list(label_mapping['encoder'].keys())}")
+    # Support both old ('encoder') and new ('class_to_label') label mapping formats
+    if 'encoder' in label_mapping:
+        class_list = list(label_mapping['encoder'].keys())
+    elif 'class_to_label' in label_mapping:
+        class_list = list(label_mapping['class_to_label'].keys())
+    else:
+        class_list = [str(i) for i in range(metadata['n_classes'])]
+    print(f"Classes: {class_list}")
     print("="*60)
     
     return X_train, X_test, y_train, y_test, metadata
@@ -461,7 +468,13 @@ def train_sound_classifier(data_dir, model_dir, epochs=100, batch_size=32,
     print("\n" + "="*60)
     print("CLASSIFICATION REPORT")
     print("="*60)
-    class_names = list(metadata['label_mapping']['encoder'].keys())
+    lm = metadata['label_mapping']
+    if 'encoder' in lm:
+        class_names = list(lm['encoder'].keys())
+    elif 'class_to_label' in lm:
+        class_names = list(lm['class_to_label'].keys())
+    else:
+        class_names = [str(i) for i in range(metadata['n_classes'])]
     # Get unique labels present in test set to avoid mismatch errors
     unique_labels = sorted(np.unique(np.concatenate([y_test, results['predictions']])))
     labels_in_test = [class_names[i] for i in unique_labels if i < len(class_names)]
