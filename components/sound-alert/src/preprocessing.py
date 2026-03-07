@@ -64,6 +64,16 @@ class AudioPreprocessor:
             MFCC features with shape (n_mfcc, n_frames)
         """
         try:
+            # Trim leading/trailing silence so MFCC frames capture actual sound,
+            # not dead air at the file edges. Must match the same trim applied
+            # at inference time in realtime_detection.py.
+            try:
+                audio_trimmed, _ = librosa.effects.trim(audio, top_db=40)
+                if len(audio_trimmed) >= int(self.sample_rate * 0.3):  # keep if ≥ 0.3s
+                    audio = audio_trimmed
+            except Exception:
+                pass  # fall back to untrimmed audio if librosa.effects.trim fails
+
             # Extract MFCC features
             mfcc = librosa.feature.mfcc(y=audio, sr=self.sample_rate, 
                                        n_mfcc=self.n_mfcc)

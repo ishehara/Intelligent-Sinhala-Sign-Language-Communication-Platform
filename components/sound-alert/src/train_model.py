@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, models, callbacks
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -191,6 +192,15 @@ class SoundClassifierCNN:
         print(f"Batch size: {batch_size}")
         print(f"Epochs: {epochs}")
         print("="*60)
+
+        # Compute class weights to handle imbalanced data
+        unique_classes = np.unique(y_train)
+        weights = compute_class_weight('balanced', classes=unique_classes, y=y_train)
+        class_weight_dict = dict(zip(unique_classes.tolist(), weights.tolist()))
+        print("\nClass weights (to balance imbalanced data):")
+        for cls, w in sorted(class_weight_dict.items()):
+            print(f"  Class {cls}: {w:.4f}")
+        print()
         
         # Get callbacks
         callback_list = self.get_callbacks(model_dir)
@@ -202,6 +212,7 @@ class SoundClassifierCNN:
             epochs=epochs,
             batch_size=batch_size,
             callbacks=callback_list,
+            class_weight=class_weight_dict,
             verbose=1
         )
         
