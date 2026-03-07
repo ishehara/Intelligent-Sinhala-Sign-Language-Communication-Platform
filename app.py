@@ -187,7 +187,7 @@ if __name__ == "__main__":
     if not MODELS_DIR.exists():
         log.warning(f"'{MODELS_DIR}' not found — run the notebook first!")
     
-    app.run(debug=True, host="192.168.43.243", port=5000)
+    app.run(debug=True, host="192.168.8.104", port=5000)
     # app.run(debug=True, host="0.0.0.0", port=5000)
 
     #192.168.43.243  192.168.8.104
