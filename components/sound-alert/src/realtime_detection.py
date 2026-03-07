@@ -47,6 +47,17 @@ class RealtimeSoundDetector:
         self.n_frames = self.metadata['n_frames']
         self.sample_rate = self.metadata['sample_rate']
         self.duration = self.metadata['duration']
+
+        # Load per-coefficient MFCC normalization stats saved during preprocessing.
+        # These must be applied at inference to match the training feature distribution.
+        self.mfcc_mean = None
+        self.mfcc_std  = None
+        if 'mfcc_mean' in self.metadata and 'mfcc_std' in self.metadata:
+            self.mfcc_mean = np.array(self.metadata['mfcc_mean'], dtype=np.float32)
+            self.mfcc_std  = np.array(self.metadata['mfcc_std'],  dtype=np.float32)
+            print(f"✓ MFCC normalization stats loaded ({self.n_mfcc} coefficients)")
+        else:
+            print("⚠️  No MFCC normalization stats in metadata — skipping normalization")
         
         print("="*70)
         print("REAL-TIME SOUND DETECTOR")
@@ -58,8 +69,9 @@ class RealtimeSoundDetector:
     
     def preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
         """
-        Preprocess audio to match training data quality.
-        Applies normalization, noise reduction, and signal enhancement.
+        Preprocess audio to match training data.
+        NOTE: must stay consistent with AudioPreprocessor.extract_mfcc() used at training time.
+        Training does NOT apply pre-emphasis, so we do not apply it here either.
         
         Args:
             audio: Raw audio waveform
@@ -67,29 +79,24 @@ class RealtimeSoundDetector:
         Returns:
             Preprocessed audio waveform
         """
-        # Remove DC offset
+        # Remove DC offset (harmless; mic recordings can have a DC bias)
         audio = audio - np.mean(audio)
         
-        # Normalize amplitude to [-1, 1] range
+        # Normalize amplitude so quiet mic input matches training-data scale
         max_val = np.abs(audio).max()
         if max_val > 0:
             audio = audio / max_val
         
-        # Apply pre-emphasis filter to amplify high frequencies
-        # This helps with MFCC feature extraction
-        pre_emphasis = 0.97
-        audio = np.append(audio[0], audio[1:] - pre_emphasis * audio[:-1])
-        
-        # Simple noise gate - remove very low amplitude signals (likely noise)
-        noise_threshold = 0.01  # Adjust this value if needed
-        audio = np.where(np.abs(audio) < noise_threshold, 0, audio)
-        
-        # Normalize again after noise gate
-        max_val = np.abs(audio).max()
-        if max_val > 0:
-            audio = audio / max_val
+        # ⚠️  Pre-emphasis filter intentionally removed.
+        # Training data was processed without pre-emphasis (raw librosa.load → MFCC).
+        # Adding pre-emphasis here changes the spectral shape and causes a
+        # systematic feature mismatch that produced identical/wrong live predictions.
         
         return audio
+
+    def rms_energy(self, audio: np.ndarray) -> float:
+        """Compute RMS energy of audio — used to detect silence."""
+        return float(np.sqrt(np.mean(audio ** 2)))
     
     def extract_features_from_audio(self, audio: np.ndarray) -> np.ndarray:
         """
@@ -101,22 +108,38 @@ class RealtimeSoundDetector:
         Returns:
             MFCC features with shape (1, n_mfcc, n_frames, 1)
         """
-        # Preprocess audio to improve quality
+        # Preprocess audio to match training data (DC removal + amplitude normalisation)
         audio = self.preprocess_audio(audio)
-        
+
+        # Trim leading/trailing silence — mirrors the identical trim in
+        # AudioPreprocessor.extract_mfcc() (preprocessing.py) used at training time.
+        # Without this the first 40 MFCC frames capture dead air before the sound
+        # starts, sending garbage features to the model.
+        try:
+            audio_trimmed, _ = librosa.effects.trim(audio, top_db=40)
+            if len(audio_trimmed) >= int(self.sample_rate * 0.3):  # keep if ≥ 0.3s
+                audio = audio_trimmed
+        except Exception:
+            pass  # fall back to untrimmed audio if trim fails
+
         # Extract MFCC
         mfcc = librosa.feature.mfcc(y=audio, sr=self.sample_rate, n_mfcc=self.n_mfcc)
-        
-        # Resize to fixed number of frames
+
+        # Truncate or pad to fixed number of frames
         if mfcc.shape[1] < self.n_frames:
             pad_width = self.n_frames - mfcc.shape[1]
             mfcc = np.pad(mfcc, ((0, 0), (0, pad_width)), mode='constant')
         else:
             mfcc = mfcc[:, :self.n_frames]
-        
+
+        # Apply per-coefficient z-score normalization — must match training.
+        # mfcc shape: (n_mfcc, n_frames); mfcc_mean/std shape: (n_mfcc,)
+        if self.mfcc_mean is not None:
+            mfcc = (mfcc - self.mfcc_mean[:, None]) / self.mfcc_std[:, None]
+
         # Reshape for CNN
         mfcc = mfcc.reshape(1, self.n_mfcc, self.n_frames, 1)
-        
+
         return mfcc
     
     def predict_from_audio(self, audio: np.ndarray):
@@ -404,73 +427,70 @@ class RealtimeSoundDetector:
                 # Record audio with manual stop capability
                 print("\n🔴 RECORDING... Press ENTER to stop")
                 print("=" * 70)
-                
-                # Use a flag to track if user stopped recording
-                stop_flag = [False]
+
                 audio_chunks = []
                 start_time = time.time()
-                
-                def record_audio():
-                    """Record audio in background thread."""
-                    chunk_size = int(self.sample_rate * 0.1)  # 100ms chunks
-                    max_chunks = int(max_duration / 0.1)
-                    
-                    for i in range(max_chunks):
-                        if stop_flag[0]:
-                            break
-                        chunk = sd.rec(chunk_size, samplerate=self.sample_rate, 
-                                     channels=1, dtype='float32')
-                        sd.wait()
-                        audio_chunks.append(chunk.flatten())
-                        
-                        # Show elapsed time every second
-                        if (i + 1) % 10 == 0:
-                            elapsed = time.time() - start_time
-                            print(f"\r⏱️  Recording: {elapsed:.1f}s (Press ENTER to stop)", end='', flush=True)
-                
+                stop_event = threading.Event()
+
+                def audio_callback(indata, frames, time_info, status):
+                    audio_chunks.append(indata[:, 0].copy())
+                    elapsed = time.time() - start_time
+                    if int(elapsed * 10) % 10 == 0:
+                        print(f"\r⏱️  Recording: {elapsed:.1f}s (Press ENTER to stop)", end='', flush=True)
+                    if elapsed >= max_duration:
+                        stop_event.set()
+
+                stream = sd.InputStream(
+                    samplerate=self.sample_rate,
+                    channels=1,
+                    dtype='float32',
+                    blocksize=int(self.sample_rate * 0.1),
+                    callback=audio_callback
+                )
+
                 def wait_for_stop():
-                    """Wait for user to press Enter to stop."""
                     input()
-                    stop_flag[0] = True
-                
-                # Start recording in background
-                record_thread = threading.Thread(target=record_audio)
-                stop_thread = threading.Thread(target=wait_for_stop)
-                
-                record_thread.start()
+                    stop_event.set()
+
+                stop_thread = threading.Thread(target=wait_for_stop, daemon=True)
                 stop_thread.start()
-                
-                # Wait for recording to finish or be stopped
-                record_thread.join()
-                
-                if not stop_flag[0]:
-                    # Recording completed full duration
-                    stop_thread.join(timeout=0.1)
-                
-                # Combine audio chunks
+
+                with stream:
+                    stop_event.wait()
+
                 if audio_chunks:
                     audio = np.concatenate(audio_chunks)
+                    # ── FIX 1: Clear buffer immediately so next recording is fresh ──
+                    audio_chunks.clear()
                     duration_recorded = len(audio) / self.sample_rate
                     print(f"\n✓ Recording stopped! ({duration_recorded:.1f} seconds captured)")
                 else:
                     print("\n⚠️  No audio captured!")
                     continue
-                
+
                 # Ensure minimum duration for MFCC extraction
                 min_length = int(self.sample_rate * 1.0)  # At least 1 second
                 if len(audio) < min_length:
                     print(f"⚠️  Recording too short ({duration_recorded:.1f}s). Need at least 1 second.")
                     continue
-                
+
+                # ── FIX 2: RMS energy gate — skip silent/background-noise recordings ──
+                rms = self.rms_energy(audio)
+                RMS_THRESHOLD = 0.005  # tune this: raise if still triggering on silence
+                if rms < RMS_THRESHOLD:
+                    print(f"🔇 Audio too quiet (RMS={rms:.5f}) — sounds like silence. Skipping prediction.")
+                    print("   (Try speaking/playing the sound closer to the microphone)")
+                    continue
+                print(f"🔊 Audio energy OK (RMS={rms:.4f})")
+
                 # Use the actual recorded audio length for MFCC extraction
-                # Update duration temporarily for this prediction
                 original_duration = self.duration
                 self.duration = duration_recorded
-                
+
                 # Analyze the sound
                 print("🔍 Analyzing sound...")
                 predicted_class, confidence, probabilities = self.predict_from_audio(audio)
-                
+
                 # Restore original duration
                 self.duration = original_duration
                 

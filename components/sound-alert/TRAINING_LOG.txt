@@ -1,0 +1,419 @@
+================================================================================
+SOUND ALERT MODEL - TRAINING & DEBUGGING LOG
+================================================================================
+Project : Intelligent Sinhala Sign Language Communication Platform
+Component: sound-alert (Alert Sound Detection CNN)
+Date     : March 7, 2026
+Goal     : Train a CNN to detect 8 alert sound classes (4 sirens + 4 horn types)
+           in real-time via microphone input.
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 1 ─ FIRST ATTEMPT TO PREPROCESS DATA
+────────────────────────────────────────────────────────────────────────────────
+
+Command run (from project root):
+  python components\sound-alert\src\process_alert_sounds.py
+    --horns_dir "datasets/Vehicle Horns"
+    --sirens_dir "datasets/sirens"
+    --output_dir "components/sound-alert/data/processed/alert_sounds"
+
+ERROR OUTPUT:
+  ModuleNotFoundError: No module named 'threadpoolctl'
+  (Traceback from sklearn → sklearn.utils.parallel → threadpoolctl)
+
+ROOT CAUSE:
+  threadpoolctl is a required dependency of scikit-learn that was missing
+  from the virtual environment.
+
+FIX ATTEMPTED:
+  pip install threadpoolctl
+  → Installed to global Python (C:\Users\ASUS\AppData\Local\Programs\Python\...)
+    NOT to the active venv.
+
+RESULT:
+  Same error persisted because the script was using the nested venv at
+  components\sound-alert\venv, which still lacked threadpoolctl.
+
+CORRECT FIX:
+  components\sound-alert\venv\Scripts\python.exe -m pip install threadpoolctl
+  (Installing directly into the nested component venv)
+
+RESULT:
+  threadpoolctl installed successfully into the correct environment.
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 2 ─ SECOND ATTEMPT TO PREPROCESS DATA
+────────────────────────────────────────────────────────────────────────────────
+
+Command re-run with same arguments as Step 1.
+
+ERROR OUTPUT:
+  ModuleNotFoundError: No module named 'llvmlite'
+  (Traceback from librosa → numba → llvmlite)
+
+  Additionally — sirens dataset failed silently:
+    ⚠️  Unknown category 'ambulance siren', skipping
+    ⚠️  Unknown category 'firetruck siren', skipping
+    ⚠️  Unknown category 'police siren', skipping
+    ⚠️  Unknown category 'traffic siren', skipping
+    ❌ No data was loaded from any dataset!
+
+ROOT CAUSE (issue 1):
+  llvmlite is a dependency of numba, which is used by librosa for audio loading.
+  It was missing from the nested venv.
+
+ROOT CAUSE (issue 2):
+  The script's SIREN_CATEGORIES set only contained:
+    {'ambulance', 'firetruck', 'police', 'traffic'}
+  But the actual folder names in datasets/Siren/ were:
+    'ambulance Siren', 'firetruck Siren', 'police Siren', 'traffic Siren'
+  (with " Siren" suffix) — so they all matched "Unknown category" and were skipped.
+
+FIX APPLIED (issue 1):
+  pip install llvmlite librosa
+  (Installed into the active project venv)
+
+FIX APPLIED (issue 2 — code change in process_alert_sounds.py):
+  BEFORE:
+    SIREN_CATEGORIES = {'ambulance', 'firetruck', 'police', 'traffic'}
+
+  AFTER:
+    SIREN_CATEGORIES = {'ambulance', 'firetruck', 'police', 'traffic',
+                        'ambulance siren', 'firetruck siren',
+                        'police siren', 'traffic siren'}
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 3 ─ ATTEMPT TO TRAIN MODEL
+────────────────────────────────────────────────────────────────────────────────
+
+Command run:
+  python components\sound-alert\src\train_model.py
+    --data_dir "components/sound-alert/data/processed/alert_sounds"
+    --model_dir "components/sound-alert/models/alert_sounds_cnn"
+    --epochs 100
+
+ERROR OUTPUT:
+  ModuleNotFoundError: No module named 'pyparsing'
+  (Traceback from matplotlib → matplotlib.rcsetup → pyparsing)
+
+ROOT CAUSE:
+  pyparsing is a dependency of matplotlib (used for training plots) and was
+  missing from the nested venv at components\sound-alert\venv.
+
+FIX APPLIED:
+  components\sound-alert\venv\Scripts\python.exe -m pip install pyparsing
+
+  Also recommended installing all requirements at once to avoid further
+  one-by-one missing-module errors:
+    components\sound-alert\venv\Scripts\python.exe -m pip install -r
+    components\sound-alert\requirements.txt
+
+RESULT:
+  Training completed successfully.
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 4 ─ FIRST REAL-TIME DETECTION RUN (CORRECT RUN)
+────────────────────────────────────────────────────────────────────────────────
+
+At this point the model had been trained with the ORIGINAL configuration:
+  - 2-class model: horn (label 0) / siren (label 1)
+  - All horn sub-types merged into one "horn" class
+  - All siren sub-types merged into one "siren" class
+
+Command used:
+  cd components\sound-alert
+  python src\realtime_detection.py
+    --model_dir "models/alert_sounds_cnn"
+    --data_dir "data/processed/alert_sounds"
+    --mode interactive --show_all
+
+OUTPUT (playing police siren):
+  🔊 DETECTED SOUND: POLICE
+  📊 CONFIDENCE: 81.79%
+  All Probabilities:
+    police           81.79%
+    firetruck        12.13%
+    truck horns       3.40%
+    car horns         1.28%
+    train horns       1.00%
+    ambulance         0.18%
+    bus horns         0.11%
+    motorcycle horns  0.06%
+    traffic           0.04%
+
+NOTE: This was the working screenshot shared — all 9 classes shown individually.
+      This was actually the OLD model (9-class) trained earlier from a different
+      session. The user requested this behaviour to be replicated.
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 5 ─ RESTRUCTURE: CHANGE FROM 2-CLASS TO 9 INDIVIDUAL CLASSES
+────────────────────────────────────────────────────────────────────────────────
+
+GOAL:
+  Match the previous working model — detect all sounds individually:
+    Horn classes (5): bus horns, car horns, motorcycle horns, train horns,
+                      truck horns
+    Siren classes (4): ambulance, firetruck, police, traffic
+
+CHANGES MADE to process_alert_sounds.py:
+  - Replaced HORN_CATEGORIES / SIREN_CATEGORIES with a CATEGORY_MAP dict
+    that maps each folder name to its individual class name
+  - Changed CLASS_NAMES from ['horn', 'siren'] to all 9 individual names
+  - Added CLASS_TO_LABEL mapping
+  - Updated label_mapping JSON to reflect 9 classes
+  - Updated metadata n_classes from 2 to 9
+  - Updated all print/display code to show per-class counts
+
+Data re-preprocessed and model retrained.
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 6 ─ PROBLEM: MODEL ALWAYS PREDICTS "FIRETRUCK" (97.99%)
+────────────────────────────────────────────────────────────────────────────────
+
+OUTPUT (for every sound played):
+  🔊 DETECTED SOUND: FIRETRUCK
+  📊 CONFIDENCE: 97.99%
+  All Probabilities:
+    firetruck         97.99%
+    truck horns        1.44%
+    car horns          0.30%
+    train horns        0.20%
+    ...
+
+ROOT CAUSE:
+  Severe class imbalance in training data:
+    bus horns:        5 samples    ← almost no data
+    car horns:       397 samples
+    motorcycle horns:  0 samples   ← NO data at all
+    train horns:      42 samples
+    truck horns:      12 samples   ← very few
+    ambulance:       400 samples
+    firetruck:       400 samples   ← dominant
+    police:          440 samples
+    traffic:         421 samples
+
+  The model saw ~400 firetruck samples vs ~12 truck horn samples.
+  It learned to always predict "firetruck" to maximize accuracy.
+
+FIX APPLIED (train_model.py):
+  Added automatic class weight balancing using sklearn's compute_class_weight:
+    from sklearn.utils.class_weight import compute_class_weight
+    weights = compute_class_weight('balanced', classes=unique_classes, y=y_train)
+    class_weight_dict = dict(zip(unique_classes, weights))
+    model.fit(..., class_weight=class_weight_dict)
+
+RESULT:
+  Still predicted wrong — class weights help but cannot compensate when
+  some classes have only 5–12 samples vs 400 for others. Not enough data
+  to learn from.
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 7 ─ PROBLEM: STILL WRONG PREDICTIONS (CAR HORNS FOR SIREN)
+────────────────────────────────────────────────────────────────────────────────
+
+OUTPUT (playing siren):
+  🔊 DETECTED SOUND: CAR HORNS
+  📊 CONFIDENCE: 99.98%
+
+ROOT CAUSE:
+  Class weights alone cannot save classes with 0–5 real samples.
+  motorcycle horns had 0 files → wasted class slot
+  bus horns had 5 files → not learnable
+
+FIX APPLIED:
+  1. Removed motorcycle horns from CLASS_NAMES entirely (no audio files exist)
+  2. Added audio augmentation to process_alert_sounds.py for minority classes:
+     - Added augment_features() function using librosa:
+         * Gaussian noise addition
+         * Time stretching (rate 0.85–1.15)
+         * Pitch shifting (±2 semitones)
+         * Combined noise + pitch shift
+     - Set AUG_TARGET = 150 (initial) → raised to 400 (final)
+       Any class with fewer than 400 samples is augmented up to 400.
+  3. Final CLASS_NAMES (8 classes):
+       ['bus horns', 'car horns', 'train horns', 'truck horns',
+        'ambulance', 'firetruck', 'police', 'traffic']
+
+Post-augmentation class distribution (all ~400 each):
+  bus horns:   5 → 400  (augmented)
+  car horns:  397        (no augmentation needed)
+  train horns: 42 → 400 (augmented)
+  truck horns: 12 → 400 (augmented)
+  ambulance:  400
+  firetruck:  400
+  police:     440
+  traffic:    421
+  Total: ~3200 samples (balanced)
+
+Model retrained with balanced data + class weights.
+Final training results:
+  test_accuracy : 95.87%
+  best_val_accuracy: 96.16%
+  epochs_trained: 51 (early stopping)
+  n_classes: 8
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 8 ─ PROBLEM: IDENTICAL OUTPUT EVERY DETECTION (NOISE GATE BUG)
+────────────────────────────────────────────────────────────────────────────────
+
+After retraining with balanced data, all 3 detections returned:
+  🔊 DETECTED SOUND: FIRETRUCK
+  📊 CONFIDENCE: 70.08%
+  All Probabilities:
+    firetruck   70.08%
+    train horns 18.46%
+    truck horns  6.46%
+    car horns    4.63%
+    ...
+
+Critically: EXACT same percentages for all 3 detections regardless of sound.
+
+ROOT CAUSE:
+  A "noise gate" in realtime_detection.py preprocess_audio() was zeroing out
+  microphone input:
+    noise_threshold = 0.01
+    audio = np.where(np.abs(audio) < noise_threshold, 0, audio)
+
+  Microphone recordings, after normalization to [-1,1], have many samples
+  with amplitude below 0.01 — so the gate wiped out nearly all the signal,
+  producing the same all-zeros (or near-zeros) MFCC features every time.
+  The model consistently mapped zero features → "firetruck".
+
+FIX APPLIED (realtime_detection.py):
+  Removed the noise gate block entirely:
+  REMOVED:
+    noise_threshold = 0.01
+    audio = np.where(np.abs(audio) < noise_threshold, 0, audio)
+    max_val = np.abs(audio).max()
+    if max_val > 0:
+        audio = audio / max_val
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 9 ─ PROBLEM: STILL IDENTICAL OUTPUT (AUDIO RECORDING BUG)
+────────────────────────────────────────────────────────────────────────────────
+
+After removing noise gate, outputs changed label to "TRUCK HORNS" but were
+still identical across all recordings:
+  🔊 DETECTED SOUND: TRUCK HORNS
+  📊 CONFIDENCE: 46.01%
+  All Probabilities:
+    truck horns   46.01%
+    firetruck     30.59%
+    train horns   19.01%
+    car horns      3.93%
+    ...
+  (exact same values every single recording regardless of sound played)
+
+ROOT CAUSE:
+  The original recording code in run_interactive() used sd.rec() in a loop
+  inside a background thread:
+    for i in range(max_chunks):
+        chunk = sd.rec(chunk_size, ...)
+        sd.wait()
+        audio_chunks.append(chunk.flatten())
+
+  Calling sd.rec() repeatedly from a non-main thread caused it to overwrite
+  the same internal sounddevice buffer each time. Every recording returned
+  the same stale audio data → same MFCC features → same prediction.
+
+FIX APPLIED (realtime_detection.py):
+  Replaced the broken sd.rec() loop with sd.InputStream using a callback:
+
+  BEFORE (broken):
+    def record_audio():
+        for i in range(max_chunks):
+            if stop_flag[0]: break
+            chunk = sd.rec(chunk_size, samplerate=..., channels=1, dtype='float32')
+            sd.wait()
+            audio_chunks.append(chunk.flatten())
+    record_thread = threading.Thread(target=record_audio)
+    record_thread.start()
+
+  AFTER (fixed):
+    def audio_callback(indata, frames, time_info, status):
+        audio_chunks.append(indata[:, 0].copy())
+
+    stream = sd.InputStream(
+        samplerate=self.sample_rate,
+        channels=1,
+        dtype='float32',
+        blocksize=int(self.sample_rate * 0.1),
+        callback=audio_callback
+    )
+    stop_event = threading.Event()
+    with stream:
+        stop_event.wait()  # blocks until user presses ENTER
+
+  The InputStream callback runs in sounddevice's own audio thread, correctly
+  capturing a fresh buffer each 100ms and appending it to audio_chunks.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SUMMARY OF ALL CHANGES MADE
+────────────────────────────────────────────────────────────────────────────────
+
+FILE: components/sound-alert/src/process_alert_sounds.py
+  ✓ Added 'ambulance siren', 'firetruck siren', 'police siren', 'traffic siren'
+    to category matching (folders have " Siren" suffix)
+  ✓ Changed from 2-class (horn/siren) to 8 individual classes
+  ✓ Removed motorcycle horns (no audio files available)
+  ✓ Added augment_features() using librosa pitch shift, time stretch, noise
+  ✓ Set AUG_TARGET = 400 to balance all classes to ~400 samples each
+  ✓ Added librosa import with graceful fallback if not available
+
+FILE: components/sound-alert/src/train_model.py
+  ✓ Added sklearn compute_class_weight import
+  ✓ Added automatic class weight computation in train() method
+  ✓ Passes class_weight=class_weight_dict to model.fit()
+
+FILE: components/sound-alert/src/realtime_detection.py
+  ✓ Removed noise gate (was zeroing out mic input below 0.01 amplitude)
+  ✓ Replaced broken sd.rec() loop with sd.InputStream callback-based recording
+
+────────────────────────────────────────────────────────────────────────────────
+CURRENT MODEL STATUS
+────────────────────────────────────────────────────────────────────────────────
+
+Model file : components/sound-alert/models/alert_sounds_cnn/best_model.keras
+Classes (8): bus horns, car horns, train horns, truck horns,
+             ambulance, firetruck, police, traffic
+Test accuracy : 95.87%
+Val accuracy  : 96.16%
+Epochs trained: 51 (early stopping triggered)
+Training date : March 7, 2026
+
+────────────────────────────────────────────────────────────────────────────────
+COMMANDS TO RERUN FULL PIPELINE (from project root)
+────────────────────────────────────────────────────────────────────────────────
+
+1. Preprocess data:
+   python components\sound-alert\src\process_alert_sounds.py
+     --horns_dir "datasets/Vehicle Horns"
+     --sirens_dir "datasets/Siren"
+     --output_dir "components/sound-alert/data/processed/alert_sounds"
+
+2. Train model:
+   python components\sound-alert\src\train_model.py
+     --data_dir "components/sound-alert/data/processed/alert_sounds"
+     --model_dir "components/sound-alert/models/alert_sounds_cnn"
+     --epochs 100
+
+3. Run real-time detection:
+   python components\sound-alert\src\realtime_detection.py
+     --model_dir "components/sound-alert/models/alert_sounds_cnn"
+     --data_dir "components/sound-alert/data/processed/alert_sounds"
+     --mode interactive --show_all
+
+================================================================================
+END OF LOG
+================================================================================

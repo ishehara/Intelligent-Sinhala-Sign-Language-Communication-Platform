@@ -5,6 +5,8 @@ librosa>=0.10.0
 soundfile>=0.12.0
 audioread>=3.0.0
 sounddevice>=0.4.6  # For microphone input
+numba>=0.58.0       # Required by librosa
+llvmlite>=0.41.0    # Required by numba
 
 # Data processing
 numpy>=1.24.0
@@ -22,5 +24,3 @@ seaborn>=0.12.0
 
 # Utilities
 tqdm>=4.65.0
-components\sound-alert\src\run_preprocessing.py
-python components\sound-alert\src\run_preprocessing.py --data_dir "datasets/Vehicle Horns" --output_dir "components/sound-alert/data/processed/vehicle_horns"
