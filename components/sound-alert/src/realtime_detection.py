@@ -404,7 +404,7 @@ class RealtimeSoundDetector:
             max_duration: Maximum recording duration in seconds (default: 30s)
         """
         print("\n" + "="*70)
-        print("🎙️  INTERACTIVE SOUND DETECTION")
+        print("🎙️  ENVIRONMENTAL SOUND DETECTION")
         print("="*70)
         print(f"Max recording duration: {max_duration} seconds")
         print("\nControls:")
@@ -476,12 +476,12 @@ class RealtimeSoundDetector:
 
                 # ── FIX 2: RMS energy gate — skip silent/background-noise recordings ──
                 rms = self.rms_energy(audio)
-                RMS_THRESHOLD = 0.005  # tune this: raise if still triggering on silence
+                RMS_THRESHOLD = 0.0001  # lowered from 0.005; RMS is always printed so you can tune further
+                print(f"🔊 Audio RMS = {rms:.6f}  (threshold = {RMS_THRESHOLD})")
                 if rms < RMS_THRESHOLD:
-                    print(f"🔇 Audio too quiet (RMS={rms:.5f}) — sounds like silence. Skipping prediction.")
-                    print("   (Try speaking/playing the sound closer to the microphone)")
+                    print(f"🔇 Audio too quiet — sounds like silence. Skipping prediction.")
+                    print("   Raise your speaker volume or move it closer to the microphone.")
                     continue
-                print(f"🔊 Audio energy OK (RMS={rms:.4f})")
 
                 # Use the actual recorded audio length for MFCC extraction
                 original_duration = self.duration
