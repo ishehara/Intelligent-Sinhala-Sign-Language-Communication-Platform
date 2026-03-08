@@ -1,5 +1,5 @@
 deactivate
-venv\Scripts\activate
+components\sound-alert\venv\Scripts\activate
 python src\realtime_detection.py --model_dir "models/vehicle_horns_cnn" --data_dir "data/processed/vehicle_horns" --mode interactive --show_all
 
 -- all sounds -- 
