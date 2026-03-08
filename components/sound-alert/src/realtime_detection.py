@@ -175,11 +175,13 @@ class RealtimeSoundDetector:
         print("\n🎤 Recording audio...", end='', flush=True)
         
         # Record audio
+        # device=1 → Microphone Array (Realtek) — physical laptop mic
         audio = sd.rec(
             int(self.duration * self.sample_rate),
             samplerate=self.sample_rate,
             channels=1,
-            dtype='float32'
+            dtype='float32',
+            device=1,
         )
         sd.wait()  # Wait until recording is finished
         
@@ -445,7 +447,8 @@ class RealtimeSoundDetector:
                     channels=1,
                     dtype='float32',
                     blocksize=int(self.sample_rate * 0.1),
-                    callback=audio_callback
+                    callback=audio_callback,
+                    device=1,
                 )
 
                 def wait_for_stop():
