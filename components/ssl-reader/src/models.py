@@ -503,15 +503,15 @@ class MultiStreamFusionModel(nn.Module):
     def __init__(
         self,
         hand_dim: int = 126,
-        face_dim: int = 232,  # Updated default for filtered face
-        pose_dim: int = 99,   # Updated default with pose enabled
+        face_dim: int = 180,  # Diagnostic: 60 key landmarks × 3, no blendshapes
+        pose_dim: int = 0,    # Diagnostic: pose disabled
         num_classes: int = 227,
         hand_hidden: int = 128,
         face_hidden: int = 256,
         pose_hidden: int = 128,
         fusion_dim: int = 512,
-        dropout: float = 0.5,  # INCREASED from 0.3 to fight memorization!
-        use_pose: bool = True  # Now enabled by default
+        dropout: float = 0.3,  # Balanced dropout
+        use_pose: bool = False  # Disabled for diagnostic run
     ):
         """
         Initialize Multi-Stream model.
@@ -574,15 +574,12 @@ class MultiStreamFusionModel(nn.Module):
             dropout=dropout
         )
         
-        # Classifier with AGGRESSIVE dropout (fight data starvation!)
+        # Classifier with moderate dropout
         self.classifier = nn.Sequential(
             nn.Linear(fusion_dim, fusion_dim // 2),
             nn.ReLU(),
-            nn.Dropout(dropout),  # First dropout
-            nn.Linear(fusion_dim // 2, fusion_dim // 4),
-            nn.ReLU(),
-            nn.Dropout(dropout * 0.8),  # Second dropout (slightly reduced)
-            nn.Linear(fusion_dim // 4, num_classes)
+            nn.Dropout(dropout),
+            nn.Linear(fusion_dim // 2, num_classes)
         )
     
     def forward(self, x: torch.Tensor):

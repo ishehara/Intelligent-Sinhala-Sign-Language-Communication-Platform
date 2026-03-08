@@ -45,9 +45,10 @@ class MediaPipeFeatureExtractor:
         self,
         max_frames: int = 60,
         use_hands: bool = True,
-        use_pose: bool = True,  # Now enabled for body context
-        use_face: bool = True,  # Enable facial expression capture
+        use_pose: bool = False,  # Disabled for diagnostic run
+        use_face: bool = True,   # Enable facial expression capture
         use_filtered_face: bool = True,  # Use only key facial landmarks (reduces dims)
+        use_blendshapes: bool = False,   # Disabled for diagnostic run (spatial only)
         model_dir: str = None
     ):
         """
@@ -68,6 +69,7 @@ class MediaPipeFeatureExtractor:
         self.use_pose = use_pose
         self.use_face = use_face
         self.use_filtered_face = use_filtered_face
+        self.use_blendshapes = use_blendshapes
         
         # Key facial landmark indices for emotion/expression (reduces 468 → ~60 landmarks)
         # Eyes: 33,133,160,144,153,157 (left), 362,263,387,373,380,386 (right)
@@ -213,7 +215,23 @@ class MediaPipeFeatureExtractor:
                 # Use zeros if detection fails
                 features.append(np.zeros(21 * 2 * 3))  # 2 hands, 21 landmarks, 3 coords each
         
-        # Extract pose landmarks
+        # Extract face landmarks BEFORE pose so layout = [hands, face, pose]
+        # This matches the model split: hand_features + face_features + pose_features
+        if self.face_landmarker:
+            try:
+                face_result = self.face_landmarker.detect(mp_image)
+                face_features = self._process_face_landmarks(face_result)
+                features.append(face_features)
+            except Exception as e:
+                logger.warning(f"Face detection failed: {e}")
+                # Use zeros if detection fails
+                bs_dim = 52 if self.use_blendshapes else 0
+                if self.use_filtered_face:
+                    features.append(np.zeros(len(self.key_face_indices) * 3 + bs_dim))
+                else:
+                    features.append(np.zeros(468 * 3 + bs_dim))
+
+        # Extract pose landmarks AFTER face so layout = [hands, face, pose]
         if self.pose_landmarker:
             try:
                 pose_result = self.pose_landmarker.detect(mp_image)
@@ -223,21 +241,7 @@ class MediaPipeFeatureExtractor:
                 logger.warning(f"Pose detection failed: {e}")
                 # Use zeros if detection fails
                 features.append(np.zeros(33 * 3))  # 33 landmarks, 3 coords each
-        
-        # Extract face landmarks
-        if self.face_landmarker:
-            try:
-                face_result = self.face_landmarker.detect(mp_image)
-                face_features = self._process_face_landmarks(face_result)
-                features.append(face_features)
-            except Exception as e:
-                logger.warning(f"Face detection failed: {e}")
-                # Use zeros if detection fails
-                if self.use_filtered_face:
-                    features.append(np.zeros(len(self.key_face_indices) * 3 + 52))  # 60 landmarks + 52 blendshapes
-                else:
-                    features.append(np.zeros(468 * 3 + 52))  # 468 landmarks + 52 blendshapes
-        
+
         # Combine all features
         return np.concatenate(features) if features else np.zeros(1)
     
@@ -270,8 +274,9 @@ class MediaPipeFeatureExtractor:
     def _process_face_landmarks(self, result) -> np.ndarray:
         """Process face landmark and blendshape results into feature vector."""
         if self.use_filtered_face:
-            # Use only key facial landmarks (60 × 3) + 52 blendshapes = 232 dims
-            face_features = np.zeros(len(self.key_face_indices) * 3 + 52)
+            # Filtered: 60 key landmarks × 3 = 180 dims, + 52 blendshapes if enabled
+            bs_dim = 52 if self.use_blendshapes else 0
+            face_features = np.zeros(len(self.key_face_indices) * 3 + bs_dim)
             
             if result.face_landmarks:
                 face_landmarks = result.face_landmarks[0]  # First face
@@ -283,15 +288,16 @@ class MediaPipeFeatureExtractor:
                         base_idx = out_idx * 3
                         face_features[base_idx:base_idx + 3] = [landmark.x, landmark.y, landmark.z]
                 
-                # Extract blendshapes (facial expressions) - keep all 52
-                if result.face_blendshapes:
+                # Extract blendshapes only if enabled
+                if self.use_blendshapes and result.face_blendshapes:
                     blendshapes = result.face_blendshapes[0]
                     for bs_idx, blendshape in enumerate(blendshapes):
                         if bs_idx < 52:
                             face_features[len(self.key_face_indices) * 3 + bs_idx] = blendshape.score
         else:
-            # Use all 468 face landmarks + 52 blendshapes = 1456 dims (old behavior)
-            face_features = np.zeros(468 * 3 + 52)
+            # Full: 468 face landmarks × 3 = 1404 dims, + 52 blendshapes if enabled
+            bs_dim = 52 if self.use_blendshapes else 0
+            face_features = np.zeros(468 * 3 + bs_dim)
             
             if result.face_landmarks:
                 face_landmarks = result.face_landmarks[0]  # First face
@@ -301,8 +307,8 @@ class MediaPipeFeatureExtractor:
                     base_idx = lm_idx * 3
                     face_features[base_idx:base_idx + 3] = [landmark.x, landmark.y, landmark.z]
                 
-                # Extract blendshapes
-                if result.face_blendshapes:
+                # Extract blendshapes only if enabled
+                if self.use_blendshapes and result.face_blendshapes:
                     blendshapes = result.face_blendshapes[0]
                     for bs_idx, blendshape in enumerate(blendshapes):
                         if bs_idx < 52:
@@ -314,14 +320,15 @@ class MediaPipeFeatureExtractor:
         """Get the dimension of extracted features."""
         dim = 0
         if self.use_hands:
-            dim += 21 * 2 * 3  # 2 hands, 21 landmarks, 3 coords = 126
+            dim += 21 * 2 * 3  # 2 hands × 21 landmarks × 3 coords = 126
         if self.use_pose:
-            dim += 33 * 3  # 33 landmarks, 3 coords = 99
+            dim += 33 * 3  # 33 landmarks × 3 coords = 99
         if self.use_face:
+            bs_dim = 52 if self.use_blendshapes else 0
             if self.use_filtered_face:
-                dim += len(self.key_face_indices) * 3 + 52  # 60 key landmarks (3 coords) + 52 blendshapes = 232
+                dim += len(self.key_face_indices) * 3 + bs_dim  # 60 × 3 = 180, +52 if blendshapes
             else:
-                dim += 468 * 3 + 52  # 468 landmarks (3 coords) + 52 blendshapes = 1456
+                dim += 468 * 3 + bs_dim  # 468 × 3 = 1404, +52 if blendshapes
         return dim if dim > 0 else 1
     
     def process_video(self, video_path: str) -> Optional[np.ndarray]:

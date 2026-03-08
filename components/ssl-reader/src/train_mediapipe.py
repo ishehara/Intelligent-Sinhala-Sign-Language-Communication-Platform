@@ -131,18 +131,21 @@ class MediaPipeTrainer:
         num_epochs: int,
         learning_rate: float = 0.001,
         patience: int = 10,
-        weight_decay: float = 1e-4  # L2 regularization to fight memorization
+        weight_decay: float = 1e-4  # L2 regularization
     ):
         """Full training loop with early stopping."""
         # AGGRESSIVE REGULARIZATION for data starvation (11 videos/class)
         optimizer = optim.Adam(
             self.model.parameters(), 
             lr=learning_rate,
-            weight_decay=weight_decay  # L2 penalty keeps weights small
+            weight_decay=weight_decay
         )
-        criterion = nn.CrossEntropyLoss()
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='max', factor=0.5, patience=5
+        # Label smoothing prevents overconfidence on 227 classes with scarce data
+        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+        # Cosine warm restarts: LR cycles 0→max→0 every T_0 epochs then doubles each cycle.
+        # This helps escape plateaus that ReduceLROnPlateau gets stuck in.
+        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, T_0=30, T_mult=2, eta_min=1e-6
         )
         
         epochs_no_improve = 0
@@ -181,9 +184,9 @@ class MediaPipeTrainer:
             # Save latest model
             self._save_checkpoint('checkpoint_latest.pth', epoch, val_acc)
             
-            # Learning rate scheduling
-            scheduler.step(val_acc)
-            
+            # Learning rate scheduling (cosine annealing, called each epoch)
+            scheduler.step()
+
             # Early stopping
             if epochs_no_improve >= patience:
                 logger.info(f"Early stopping triggered after {epoch+1} epochs")
@@ -242,12 +245,14 @@ def main():
     # MediaPipe arguments
     parser.add_argument('--use_hands', action='store_true', default=True,
                        help='Use hand landmarks (default: True)')
-    parser.add_argument('--use_pose', action='store_true', default=True,
-                       help='Use pose landmarks for body context (default: True)')
+    parser.add_argument('--use_pose', action='store_true', default=False,
+                       help='Use pose landmarks for body context (default: False - diagnostic mode)')
     parser.add_argument('--use_face', action='store_true', default=True,
-                       help='Use facial landmarks and blendshapes for emotion detection (default: True)')
+                       help='Use facial landmarks (default: True)')
     parser.add_argument('--use_filtered_face', action='store_true', default=True,
-                       help='Use only key facial landmarks (60 instead of 468) to reduce dimensions (default: True)')
+                       help='Use only key facial landmarks (60 instead of 468) (default: True)')
+    parser.add_argument('--use_blendshapes', action='store_true', default=False,
+                       help='Include 52 blendshapes in face features (default: False - diagnostic mode)')
     parser.add_argument('--max_frames', type=int, default=60,
                        help='Maximum frames per video')
     
@@ -268,8 +273,8 @@ def main():
     parser.add_argument('--learning_rate', type=float, default=0.001,
                        help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=1e-4,
-                       help='Weight decay (L2 regularization) to prevent memorization (default: 1e-4)')
-    parser.add_argument('--patience', type=int, default=15,
+                       help='Weight decay (L2 regularization) (default: 1e-4)')
+    parser.add_argument('--patience', type=int, default=20,
                        help='Early stopping patience')
     parser.add_argument('--augment', action='store_true', default=True,
                        help='Enable data augmentation for training (default: True)')
@@ -331,7 +336,8 @@ def main():
         use_hands=args.use_hands,
         use_pose=args.use_pose,
         use_face=args.use_face,
-        use_filtered_face=args.use_filtered_face
+        use_filtered_face=args.use_filtered_face,
+        use_blendshapes=args.use_blendshapes
     )
     
     feature_dim = feature_extractor.get_feature_dim()
@@ -339,11 +345,16 @@ def main():
     logger.info(f"  - Hands: {21*2*3 if args.use_hands else 0} dims (2 hands × 21 landmarks × 3 coords)")
     face_dim = 0
     if args.use_face:
+        bs_dim = 52 if args.use_blendshapes else 0
         if args.use_filtered_face:
-            face_dim = 60*3 + 52  # 232 dims (60 key landmarks × 3 + 52 blendshapes)
+            face_dim = 60*3 + bs_dim
+            bs_label = ' + 52 blendshapes' if args.use_blendshapes else ' (spatial only, NO blendshapes)'
+            logger.info(f"  - Face: {face_dim} dims (Filtered {60} key landmarks × 3 coords{bs_label})")
         else:
-            face_dim = 468*3 + 52  # 1456 dims (468 landmarks × 3 + 52 blendshapes)
-    logger.info(f"  - Face: {face_dim} dims ({'filtered: 60 key landmarks' if args.use_filtered_face and args.use_face else '468 landmarks'} × 3 coords + 52 blendshapes)")
+            face_dim = 468*3 + bs_dim
+            logger.info(f"  - Face: {face_dim} dims (468 landmarks × 3 coords{'+ 52 blendshapes' if args.use_blendshapes else ''})")
+    else:
+        logger.info(f"  - Face: 0 dims")
     logger.info(f"  - Pose: {33*3 if args.use_pose else 0} dims (33 landmarks × 3 coords)")
     
     # Create dataset splits
@@ -372,10 +383,11 @@ def main():
     pose_dim_val = 33*3 if args.use_pose else 0     # 99
     face_dim_val = 0
     if args.use_face:
+        bs_dim_aug = 52 if args.use_blendshapes else 0
         if args.use_filtered_face:
-            face_dim_val = 60*3 + 52  # 232 (filtered)
+            face_dim_val = 60*3 + bs_dim_aug  # 180 or 232 depending on blendshapes
         else:
-            face_dim_val = 468*3 + 52  # 1456 (full)
+            face_dim_val = 468*3 + bs_dim_aug  # 1404 or 1456
     
     train_dataset = SinhalaSignLanguageDataset(
         splits['train'], label_map, feature_extractor, cache_dir, 
@@ -450,10 +462,11 @@ def main():
         pose_dim_val = 33*3 if args.use_pose else 0     # 99
         face_dim_val = 0
         if args.use_face:
+            bs_dim = 52 if args.use_blendshapes else 0
             if args.use_filtered_face:
-                face_dim_val = 60*3 + 52  # 232 (filtered)
+                face_dim_val = 60*3 + bs_dim  # 180 (no blendshapes) or 232 (with blendshapes)
             else:
-                face_dim_val = 468*3 + 52  # 1456 (full)
+                face_dim_val = 468*3 + bs_dim  # 1404 or 1456
         
         model = MultiStreamFusionModel(
             hand_dim=hand_dim_val,
@@ -464,7 +477,7 @@ def main():
             face_hidden=256,
             pose_hidden=128,
             fusion_dim=512,
-            dropout=0.3,
+            dropout=0.5,
             use_pose=args.use_pose
         )
     
