@@ -1115,6 +1115,155 @@ def practice_suggestions():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/profile-data', methods=['POST'])
+def profile_data():
+    """
+    Comprehensive profile endpoint — returns everything the Profile screen needs
+    in a single request: progress, per-level breakdown, sign details,
+    RL agent stats, and practice suggestions.
+    Request: { "user_id": "default_user" }
+    """
+    try:
+        from rl_enhanced_agent import SIGN_CURRICULUM as CURR, SIGN_TO_DIFFICULTY
+        from performance_history import get_level_progress, get_unlocked_levels, get_practice_suggestions
+
+        data = request.get_json() or {}
+        user_id = data.get('user_id', 'default_user')
+        user_sign_states = enhanced_agent.user_states.get(user_id, {})
+
+        # ── 1. Overall progress ──────────────────────────────
+        progress = enhanced_agent._get_user_progress(user_id)
+
+        # ── 2. Per-level breakdown ───────────────────────────
+        levels = {}
+        for level_name, level_info in CURR.items():
+            lp = get_level_progress(user_id, level_name, user_sign_states, perf_history)
+            levels[level_name] = {
+                "description": level_info.get("description", ""),
+                "difficulty": level_info.get("difficulty", 1),
+                "total_signs": lp.get("total_signs", 0),
+                "completed_count": lp.get("completed_count", 0),
+                "level_complete": lp.get("level_complete", False),
+                "overall_accuracy": lp.get("overall_accuracy", 0),
+                "total_attempts": lp.get("total_attempts", 0),
+            }
+
+        # ── 3. Per-sign details (only attempted signs) ───────
+        sign_details_list = []
+        total_attempts_all = 0
+        total_correct_all = 0
+        total_confidence_sum = 0.0
+        signs_with_confidence = 0
+        best_sign = None
+        best_accuracy = -1
+        weakest_sign = None
+        weakest_accuracy = 101
+
+        for sign in class_labels:
+            state = enhanced_agent.get_user_sign_state(user_id, sign)
+            if state.total_attempts > 0:
+                acc = round(state.accuracy * 100, 1)
+                sign_details_list.append({
+                    "sign": sign,
+                    "total_attempts": state.total_attempts,
+                    "correct_attempts": state.correct_attempts,
+                    "accuracy": acc,
+                    "avg_confidence": round(state.avg_confidence * 100, 1),
+                    "best_confidence": round(state.best_confidence * 100, 1),
+                    "mastery_level": state.mastery_level,
+                    "current_streak": state.current_streak,
+                    "longest_streak": state.longest_streak,
+                    "is_due_for_review": state.is_due_for_review,
+                })
+                total_attempts_all += state.total_attempts
+                total_correct_all += state.correct_attempts
+                total_confidence_sum += state.avg_confidence
+                signs_with_confidence += 1
+
+                if acc > best_accuracy:
+                    best_accuracy = acc
+                    best_sign = sign
+                if acc < weakest_accuracy:
+                    weakest_accuracy = acc
+                    weakest_sign = sign
+
+        overall_accuracy = round(total_correct_all / total_attempts_all * 100, 1) if total_attempts_all > 0 else 0
+        overall_avg_confidence = round(total_confidence_sum / signs_with_confidence * 100, 1) if signs_with_confidence > 0 else 0
+
+        # Compute counts from sign_details as a reliable fallback
+        # (in case _get_user_progress returns 0 due to missing RL state)
+        computed_attempted = len(sign_details_list)
+        computed_mastered = sum(1 for s in sign_details_list if s["mastery_level"] >= 3)
+        computed_familiar = sum(1 for s in sign_details_list if s["mastery_level"] >= 2)
+
+        # Use whichever is higher — RL state or computed from actual sign data
+        final_attempted = max(progress.get("attempted", 0), computed_attempted)
+        final_mastered = max(progress.get("mastered", 0), computed_mastered)
+        final_familiar = max(progress.get("familiar", 0), computed_familiar)
+
+        # ── 4. Practice suggestions ──────────────────────────
+        suggestions = get_practice_suggestions(user_id, user_sign_states, perf_history)
+
+        # ── 5. RL agent stats ────────────────────────────────
+        rl_stats = enhanced_agent.get_stats()
+        thompson_st = thompson_agent.get_stats() if thompson_agent else {}
+
+        # ── 6. Unlocked levels ───────────────────────────────
+        unlocked = get_unlocked_levels(user_id, user_sign_states, perf_history)
+
+        return jsonify({
+            "user_id": user_id,
+
+            # Overall progress
+            "progress": {
+                "total_signs": progress.get("total_signs", 25),
+                "attempted": final_attempted,
+                "familiar": final_familiar,
+                "mastered": final_mastered,
+                "progress_pct": round(final_mastered / max(progress.get("total_signs", 25), 1) * 100, 1),
+                "current_level": progress.get("current_level", "beginner"),
+                "overall_accuracy": overall_accuracy,
+                "overall_avg_confidence": overall_avg_confidence,
+                "total_attempts": total_attempts_all,
+                "total_correct": total_correct_all,
+            },
+
+            # Best / weakest sign
+            "highlights": {
+                "best_sign": best_sign,
+                "best_accuracy": best_accuracy if best_sign else 0,
+                "weakest_sign": weakest_sign,
+                "weakest_accuracy": weakest_accuracy if weakest_sign else 0,
+            },
+
+            # Per-level data
+            "levels": levels,
+            "unlocked_levels": unlocked,
+
+            # Per-sign (only attempted)
+            "signs": sign_details_list,
+
+            # Practice suggestions
+            "practice_suggestions": suggestions[:5],
+
+            # AI agent stats
+            "ai_stats": {
+                "enhanced_agent": {
+                    "total_episodes": rl_stats.get("total_episodes", 0),
+                    "avg_reward": rl_stats.get("avg_reward_last_100", 0),
+                    "epsilon": rl_stats.get("epsilon", 0),
+                },
+                "thompson_agent": {
+                    "total_updates": thompson_st.get("total_updates", 0),
+                    "avg_reward": thompson_st.get("avg_reward_last_100", 0),
+                    "policy_summary": thompson_st.get("policy_summary", {}),
+                },
+            },
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ══════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     print("🚀 Starting Sign Language Learning Backend Server...")

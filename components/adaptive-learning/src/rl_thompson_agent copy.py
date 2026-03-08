@@ -86,6 +86,38 @@ ACTIONS = [
     'break_suggestion',
 ]
 
+# Sign-specific corrective messages ───────────────────────────
+# Shown when the user's sign is detected as WRONG. Each message
+# gives the precise hand-shape correction needed for that letter.
+
+SIGN_CORRECTIONS: Dict[str, str] = {
+    'අ': "The palm should be with fingers together, not separated.",
+    'ආ': "The thumb and other four fingers should be slightly closer.",
+    'ඇ': "The index finger should be slightly bent.",
+    'ඉ': "The palm should bend slightly like a cap shape.",
+    'උ': "The fingers and hand should form a 90-degree position.",
+    'එ': "Slightly rotate the wrist.",
+    'ක': "The thumb should be positioned between the index and middle finger.",
+    'ග': "The index finger should bend to approximately 90 degrees.",
+    'ට': "The index finger should bend more.",
+    'ද': "The hand should rotate to 90 degrees.",
+    'ත': "The hand should rotate to the opposite side.",
+    'ඩ': "The palm should rotate to the opposite side.",
+    'න': "The palm should rotate slightly to the other side.",
+    'ප': "The index finger should point downward, not upward.",
+    'බ': "The palm should rotate to the other side.",
+    'ම': "The palm should rotate to the other side.",
+    'ය': "The middle three fingers should bend more.",
+    'ර': "The index and middle fingers should stay together, not separated.",
+    'ල': "The thumb and middle finger should not bend.",
+    'ව': "The three fingers are positioned incorrectly.",
+    'ස': "The palm should rotate to the other side.",
+    'හ': "The hand position should rotate upside down.",
+    'ං': "All five fingers should bend together, not just two.",
+    'ච': "This is not a thumbs-up position.",
+    'ෆ': "Three fingers should bend slightly.",
+}
+
 # Per-action feedback templates ────────────────────────────────
 # Uses {sign}, {expected}, {conf_pct}, {streak} placeholders.
 
@@ -342,24 +374,32 @@ class ThompsonFeedbackAgent:
             action = self._sample_action(context, valid_actions)
 
         # 4. Format message
-        template_group = FEEDBACK_TEMPLATES[action]
-        templates = template_group['templates']
-        # Pick template deterministically within the action (round-robin by attempts)
-        template = templates[attempt_count % len(templates)]
+        sign_label = expected_label or predicted_label
 
-        message = template.format(
-            sign=expected_label or predicted_label,
-            expected=expected_label or '?',
-            conf_pct=confidence * 100,
-            streak=consecutive_failures,  # repurposed placeholder
-        )
+        # If the sign is WRONG and we have a sign-specific correction, use it
+        if not is_correct and sign_label in SIGN_CORRECTIONS:
+            sign_correction = SIGN_CORRECTIONS[sign_label]
+            message = f"'{sign_label}' is not quite right — {sign_correction}"
+            tip = "Compare your hand shape with the reference image side-by-side."
+            level = 'fair'
+        else:
+            template_group = FEEDBACK_TEMPLATES[action]
+            templates = template_group['templates']
+            # Pick template deterministically within the action (round-robin by attempts)
+            template = templates[attempt_count % len(templates)]
+
+            message = template.format(
+                sign=sign_label,
+                expected=expected_label or '?',
+                conf_pct=confidence * 100,
+                streak=consecutive_failures,  # repurposed placeholder
+            )
+            tip = template_group['tip']
+            level = template_group['level']
 
         # Append no-hand warning
         if not hand_detected:
             message = '✋ No hand detected. ' + message
-
-        tip = template_group['tip']
-        level = template_group['level']
 
         # Promote poor → fair when sign is actually correct (letter match)
         if is_correct and level in ('poor', 'incorrect'):
