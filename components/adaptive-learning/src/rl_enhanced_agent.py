@@ -69,7 +69,29 @@ SIGN_CURRICULUM = {
         "difficulty": 3,
         "description": "Complex consonants and special characters",
     },
+    "dynamic_beginner": {
+        "signs": ['ඈ', 'ඊ', 'ඌ', 'ඒ', 'ඔ', 'ඕ'],
+        "difficulty": 2,
+        "description": "Dynamic vowel signs — motion-based hand gestures",
+    },
+    "dynamic_intermediate": {
+        "signs": ['ජ', 'ණ', 'ළ', 'ඟ', 'ඦ', 'ඳ', 'ඹ', 'ඛ'],
+        "difficulty": 3,
+        "description": "Dynamic consonant signs — moderate motion complexity",
+    },
+    "dynamic_advanced": {
+        "signs": ['ඬ', 'ඵ', 'ධ', 'ඨ', 'ඡ', 'ක්\u200dය', 'භ', 'ථ'],
+        "difficulty": 4,
+        "description": "Dynamic complex signs — advanced motion patterns",
+    },
 }
+
+# Frontend-aligned curriculum (same data, shared with performance_history)
+FRONTEND_CURRICULUM = SIGN_CURRICULUM
+
+# Level progression order for frontend
+FRONTEND_STATIC_ORDER = ["beginner", "intermediate", "advanced"]
+FRONTEND_DYNAMIC_ORDER = ["dynamic_beginner", "dynamic_intermediate", "dynamic_advanced"]
 
 ALL_SIGNS = []
 SIGN_TO_DIFFICULTY = {}
