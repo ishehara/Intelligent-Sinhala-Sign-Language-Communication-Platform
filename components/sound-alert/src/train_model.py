@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, models, callbacks
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -191,6 +192,15 @@ class SoundClassifierCNN:
         print(f"Batch size: {batch_size}")
         print(f"Epochs: {epochs}")
         print("="*60)
+
+        # Compute class weights to handle imbalanced data
+        unique_classes = np.unique(y_train)
+        weights = compute_class_weight('balanced', classes=unique_classes, y=y_train)
+        class_weight_dict = dict(zip(unique_classes.tolist(), weights.tolist()))
+        print("\nClass weights (to balance imbalanced data):")
+        for cls, w in sorted(class_weight_dict.items()):
+            print(f"  Class {cls}: {w:.4f}")
+        print()
         
         # Get callbacks
         callback_list = self.get_callbacks(model_dir)
@@ -202,6 +212,7 @@ class SoundClassifierCNN:
             epochs=epochs,
             batch_size=batch_size,
             callbacks=callback_list,
+            class_weight=class_weight_dict,
             verbose=1
         )
         
@@ -370,7 +381,14 @@ def load_preprocessed_data(data_dir):
     print(f"y_train shape: {y_train.shape}")
     print(f"y_test shape: {y_test.shape}")
     print(f"Number of classes: {metadata['n_classes']}")
-    print(f"Classes: {list(label_mapping['encoder'].keys())}")
+    # Support both old ('encoder') and new ('class_to_label') label mapping formats
+    if 'encoder' in label_mapping:
+        class_list = list(label_mapping['encoder'].keys())
+    elif 'class_to_label' in label_mapping:
+        class_list = list(label_mapping['class_to_label'].keys())
+    else:
+        class_list = [str(i) for i in range(metadata['n_classes'])]
+    print(f"Classes: {class_list}")
     print("="*60)
     
     return X_train, X_test, y_train, y_test, metadata
@@ -461,7 +479,13 @@ def train_sound_classifier(data_dir, model_dir, epochs=100, batch_size=32,
     print("\n" + "="*60)
     print("CLASSIFICATION REPORT")
     print("="*60)
-    class_names = list(metadata['label_mapping']['encoder'].keys())
+    lm = metadata['label_mapping']
+    if 'encoder' in lm:
+        class_names = list(lm['encoder'].keys())
+    elif 'class_to_label' in lm:
+        class_names = list(lm['class_to_label'].keys())
+    else:
+        class_names = [str(i) for i in range(metadata['n_classes'])]
     # Get unique labels present in test set to avoid mismatch errors
     unique_labels = sorted(np.unique(np.concatenate([y_test, results['predictions']])))
     labels_in_test = [class_names[i] for i in unique_labels if i < len(class_names)]

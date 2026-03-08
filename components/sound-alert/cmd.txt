@@ -1,4 +1,10 @@
 deactivate
-venv\Scripts\activate.bat
+venv\Scripts\activate
 python src\realtime_detection.py --model_dir "models/vehicle_horns_cnn" --data_dir "data/processed/vehicle_horns" --mode interactive --show_all
-python src\realtime_detection.py --model_dir "models/alert_sounds_cnn" --data_dir "data/processed/alert_sounds" --mode interactive --show_all
+
+-- all sounds -- 
+python components\sound-alert\src\realtime_detection.py --model_dir "components/sound-alert/models/alert_sounds_cnn" --data_dir "components/sound-alert/data/processed/alert_sounds" --mode interactive --show_all
+
+python components\sound-alert\src\process_alert_sounds.py --horns_dir "datasets/Vehicle Horns" --sirens_dir "datasets/Siren" --output_dir "components/sound-alert/data/processed/alert_sounds"
+
+python components\sound-alert\src\train_model.py --data_dir "components/sound-alert/data/processed/alert_sounds" --model_dir "components/sound-alert/models/alert_sounds_cnn" --epochs 100

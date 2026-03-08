@@ -1,0 +1,21 @@
+{
+  "test_accuracy": 0.921875,
+  "test_loss": 0.2950418293476105,
+  "n_classes": 8,
+  "class_names": [
+    "bus horns",
+    "car horns",
+    "train horns",
+    "truck horns",
+    "ambulance",
+    "firetruck",
+    "police",
+    "traffic"
+  ],
+  "training_samples": 1522,
+  "validation_samples": 268,
+  "test_samples": 448,
+  "epochs_trained": 76,
+  "best_val_accuracy": 0.9440298676490784,
+  "final_train_accuracy": 0.9586070775985718
+}
