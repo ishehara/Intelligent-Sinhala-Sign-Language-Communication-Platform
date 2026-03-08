@@ -4,23 +4,25 @@
 librosa>=0.10.0
 soundfile>=0.12.0
 audioread>=3.0.0
-sounddevice>=0.4.6  # For microphone input
-numba>=0.58.0       # Required by librosa
-llvmlite>=0.41.0    # Required by numba
+sounddevice>=0.4.6  # microphone input (realtime_detection.py, realtime_yamnet.py)
+numba>=0.58.0       # required by librosa
+llvmlite>=0.41.0    # required by numba
 
 # Data processing
 numpy>=1.24.0
 pandas>=2.0.0
-scikit-learn>=1.3.0
+scikit-learn>=1.3.0  # train_test_split, compute_class_weight, classification_report
 
-# Deep learning
+# Deep learning — MFCC-based CNN pipeline
 tensorflow>=2.15.0
-# torch>=2.0.0  # Optional: if using PyTorch instead
-# torchaudio>=2.0.0
+
+# Deep learning — YAMNet transfer-learning pipeline
+tensorflow-hub>=0.16.0   # process_yamnet.py, train_yamnet.py, realtime_yamnet.py
+setuptools>=65.0.0       # required by tensorflow-hub (pkg_resources)
 
 # Visualization
 matplotlib>=3.7.0
-seaborn>=0.12.0
+seaborn>=0.12.0          # confusion matrix in train_model.py
 
 # Utilities
 tqdm>=4.65.0

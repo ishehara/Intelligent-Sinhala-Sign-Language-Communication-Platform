@@ -1,0 +1,17 @@
+{
+  "test_loss": 0.3159610629081726,
+  "test_accuracy": 0.9040178656578064,
+  "n_classes": 8,
+  "class_names": [
+    "bus horns",
+    "car horns",
+    "train horns",
+    "truck horns",
+    "ambulance",
+    "firetruck",
+    "police",
+    "traffic"
+  ],
+  "model_type": "yamnet_transfer",
+  "trained_at": "2026-03-08T08:07:43.954879"
+}

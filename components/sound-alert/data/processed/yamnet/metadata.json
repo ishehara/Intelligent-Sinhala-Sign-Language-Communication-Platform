@@ -1,0 +1,9 @@
+{
+  "embedding_dim": 1024,
+  "n_classes": 8,
+  "sample_rate": 16000,
+  "train_samples": 1790,
+  "test_samples": 448,
+  "model_type": "yamnet_transfer",
+  "yamnet_url": "https://tfhub.dev/google/yamnet/1"
+}

@@ -8,3 +8,14 @@ python components\sound-alert\src\realtime_detection.py --model_dir "components/
 python components\sound-alert\src\process_alert_sounds.py --horns_dir "datasets/Vehicle Horns" --sirens_dir "datasets/Siren" --output_dir "components/sound-alert/data/processed/alert_sounds"
 
 python components\sound-alert\src\train_model.py --data_dir "components/sound-alert/data/processed/alert_sounds" --model_dir "components/sound-alert/models/alert_sounds_cnn" --epochs 100
+
+-- yamnet alternative model --
+python components\sound-alert\src\process_yamnet.py --horns_dir "datasets/Vehicle Horns" --sirens_dir "datasets/Siren" --output_dir "components/sound-alert/data/processed/yamnet"
+
+python components\sound-alert\src\train_yamnet.py --data_dir "components/sound-alert/data/processed/yamnet" --model_dir "components/sound-alert/models/yamnet_cnn" --epochs 80
+
+python components\sound-alert\src\realtime_yamnet.py --model_dir "components/sound-alert/models/yamnet_cnn" --data_dir "components/sound-alert/data/processed/yamnet" --show_all
+
+
+
+components\sound-alert\venv\Scripts\python.exe -m pip install tensorflow-hub

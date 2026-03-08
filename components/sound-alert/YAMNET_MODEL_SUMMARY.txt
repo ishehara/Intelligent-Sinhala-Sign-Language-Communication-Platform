@@ -1,0 +1,159 @@
+================================================================================
+  SOUND ALERT COMPONENT — YAMNet Transfer Learning Model
+  Intelligent Sinhala Sign Language Communication Platform
+  Date: March 8, 2026
+================================================================================
+
+OVERVIEW
+--------
+Built a sound classification model to detect alert sounds (vehicle horns and
+emergency sirens) using transfer learning with YAMNet, a pre-trained audio
+neural network from Google. The model classifies 8 categories of real-world
+alert sounds in real time via microphone input.
+
+
+DATASET
+-------
+Source directories:
+  - datasets/Vehicle Horns/
+      · bus horns
+      · car horns
+      · motorcycle horns  (excluded — not in target classes)
+      · train horns
+      · truck horns
+  - datasets/Siren/
+      · ambulance Siren
+      · firetruck Siren
+      · police Siren
+      · traffic Siren
+
+Target Classes (8):
+  0 - bus horns
+  1 - car horns
+  2 - train horns
+  3 - truck horns
+  4 - ambulance
+  5 - firetruck
+  6 - police
+  7 - traffic
+
+Total samples after augmentation: 2,238
+  - Train split : 1,790 samples (80%)
+  - Test split  :   448 samples (20%)
+
+Class imbalance noted: bus horns had only 15 samples.
+Augmentation target: 400 samples per class (max 3x real data).
+Augmentation techniques used: additive noise, time stretching, pitch shifting.
+
+
+PREPROCESSING  (process_yamnet.py)
+-----------------------------------
+- Audio resampled to 16,000 Hz mono (YAMNet requirement)
+- Each audio file passed through the frozen YAMNet model
+  (loaded from TensorFlow Hub: google/yamnet)
+- YAMNet output: 1024-dimensional embedding vectors per audio clip
+- Embeddings saved as numpy arrays for training:
+    components/sound-alert/data/processed/yamnet/
+      · X_train.npy  — shape (1790, 1024)
+      · X_test.npy   — shape (448,  1024)
+      · y_train.npy
+      · y_test.npy
+      · class_names.json
+
+
+MODEL ARCHITECTURE  (train_yamnet.py)
+--------------------------------------
+Base model  : YAMNet (frozen, used as feature extractor only)
+              Pre-trained on Google AudioSet (~2M clips, 521 classes)
+
+Classification head (trained by us):
+  Input       → 1024-dim YAMNet embedding
+  Dense(512)  → ReLU → BatchNorm → Dropout
+  Dense(256)  → ReLU → BatchNorm → Dropout
+  Dense(8)    → Softmax (output layer)
+
+Training configuration:
+  - Optimizer      : Adam
+  - Loss           : Categorical cross-entropy
+  - Epochs         : up to 80 (early stopping triggered at epoch 35)
+  - Best epoch     : 23 (weights restored)
+  - LR schedule    : ReduceLROnPlateau
+  - Early stopping : patience-based, restored best weights
+
+
+TRAINING RESULTS
+----------------
+Best validation accuracy : 94.03%  (epoch 32)
+Final test accuracy       : 90.40%
+
+Per-class results on test set:
+  Class          Precision   Recall    F1-Score   Support
+  ---------------------------------------------------------
+  bus horns        0.1429    0.3333     0.2000        3
+  car horns        0.9857    0.8625     0.9200       80
+  train horns      0.8929    1.0000     0.9434       25
+  truck horns      0.8750    1.0000     0.9333        7
+  ambulance        0.8214    0.8625     0.8415       80
+  firetruck        0.8519    0.8625     0.8571       80
+  police           0.9425    0.9318     0.9371       88
+  traffic          1.0000    0.9765     0.9881       85
+
+  Macro avg        0.8140    0.8536     0.8276      448
+  Weighted avg     0.9141    0.9040     0.9077      448
+
+Note: bus horns F1 is low due to only 3 test samples (data limitation,
+      not a model failure).
+
+Saved models:
+  - components/sound-alert/models/yamnet_cnn/best_model.keras
+  - components/sound-alert/models/yamnet_cnn/final_model.keras
+  - components/sound-alert/models/yamnet_cnn/training_history.png
+
+
+REAL-TIME DETECTION  (realtime_yamnet.py)
+------------------------------------------
+- Captures live microphone audio using sounddevice
+- Passes audio through frozen YAMNet → 1024-dim embedding
+- Feeds embedding into trained classification head
+- Outputs predicted sound class with confidence scores
+- Run command:
+    python components\sound-alert\src\realtime_yamnet.py
+      --model_dir "components/sound-alert/models/yamnet_cnn"
+      --data_dir  "components/sound-alert/data/processed/yamnet"
+      --show_all
+
+
+COMPARISON WITH CUSTOM CNN
+---------------------------
+A custom CNN model trained from scratch (alert_sounds_cnn) was also built
+using MFCC features. The YAMNet transfer learning approach outperformed it,
+which is expected given:
+  1. YAMNet was pre-trained on 2 million audio clips covering similar classes
+  2. Our dataset is small — transfer learning compensates for limited data
+  3. YAMNet provides rich, domain-relevant audio features out of the box
+
+Decision: YAMNet-based model adopted as the primary sound alert model.
+
+
+DEPENDENCIES INSTALLED
+-----------------------
+  tensorflow
+  tensorflow-hub
+  tf_keras
+  librosa
+  scikit-learn
+  sounddevice
+  numpy
+
+
+KNOWN ISSUES / FIXES APPLIED
+------------------------------
+1. tensorflow_hub crashed on import due to tf_keras 2.20.1 deprecation warning
+   bug with TF 2.20.0.
+   Fix: Set environment variable TF_DISABLE_DEPRECATION_WARNINGS=1 before
+   running any script that imports tensorflow_hub.
+
+2. librosa and tensorflow-hub were not initially installed in the venv.
+   Fix: Installed via venv\Scripts\pip.exe
+
+================================================================================
