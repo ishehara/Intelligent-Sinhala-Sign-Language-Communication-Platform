@@ -37,7 +37,8 @@ class SinhalaSignLanguageDataset(Dataset):
         hand_dim: int = 126,
         face_dim: int = 232,
         pose_dim: int = 99,
-        use_pose: bool = True
+        use_pose: bool = True,
+        normalize_root_relative: bool = True
     ):
         """
         Initialize the dataset.
@@ -61,6 +62,11 @@ class SinhalaSignLanguageDataset(Dataset):
         self.feature_extractor = feature_extractor
         self.use_cache = use_cache
         self.training = training
+        self.hand_dim = hand_dim
+        self.face_dim = face_dim
+        self.pose_dim = pose_dim
+        self.use_pose = use_pose
+        self.normalize_root_relative = normalize_root_relative
         
         # Initialize augmenter for training only
         self.augmenter = None
@@ -153,13 +159,66 @@ class SinhalaSignLanguageDataset(Dataset):
         # Convert to tensors
         features_tensor = torch.FloatTensor(features)
         
-        # Apply augmentation if training
+        # Apply augmentation if training (operates in absolute coordinate space)
         if self.augmenter is not None:
             features_tensor = self.augmenter(features_tensor)
-        
+
+        # Apply root-relative normalization (after augmentation, so aug stays in absolute coords)
+        if self.normalize_root_relative:
+            features_tensor = self._apply_root_relative_norm(features_tensor)
+
         label_tensor = torch.LongTensor([label_idx])
-        
+
         return features_tensor, label_tensor.squeeze()
+
+    def _apply_root_relative_norm(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        Normalize to root-relative coordinates for position invariance.
+        Layout (after extraction-order fix): [hands(0:hand_dim), face(hand_dim:+face_dim), pose(rest)]
+
+        - Hands: subtract each hand's wrist (landmark 0) from all 21 landmarks
+        - Face: subtract nose tip (landmark index 36 of 60 key landmarks) from the 60 spatial landmarks
+        - Pose: subtract mid-shoulder ((lm11 + lm12)/2) from all 33 landmarks
+
+        Blendshapes are NOT altered (they are scalar scores, not spatial coordinates).
+        Undetected body parts (all-zero blocks) remain zero after centering.
+        """
+        features = features.clone()
+        frames = features.shape[0]
+
+        # --- Hand centering (wrist-relative) ---
+        if self.hand_dim == 126:
+            # Reshape to (frames, 2 hands, 21 landmarks, 3 coords)
+            hands = features[:, :126].view(frames, 2, 21, 3)
+            wrist = hands[:, :, 0:1, :]  # (frames, 2, 1, 3)
+            detected = (wrist.abs().sum(dim=-1, keepdim=True) > 1e-6)  # (frames, 2, 1, 1)
+            hands = hands - wrist * detected.float()
+            features[:, :126] = hands.view(frames, 126)
+
+        # --- Face centering (nose-relative) ---
+        # Face landmark block is always 60 landmarks × 3 = 180 dims (blendshapes follow after)
+        if self.face_dim >= 180:
+            face_start = self.hand_dim
+            face_lm_end = face_start + 180  # Only the 60 spatial landmarks
+            face_lm = features[:, face_start:face_lm_end].view(frames, 60, 3)
+            # Nose tip (landmark 1 in MediaPipe face) is at index 36 in our 60 key-landmark list
+            nose = face_lm[:, 36:37, :]  # (frames, 1, 3)
+            detected = (nose.abs().sum(dim=-1, keepdim=True) > 1e-6)
+            face_lm = face_lm - nose * detected.float()
+            features[:, face_start:face_lm_end] = face_lm.view(frames, 180)
+            # Blendshapes at [face_lm_end : face_start+face_dim] are left unchanged
+
+        # --- Pose centering (mid-shoulder-relative) ---
+        if self.use_pose and self.pose_dim == 99:
+            pose_start = self.hand_dim + self.face_dim
+            pose = features[:, pose_start:pose_start + 99].view(frames, 33, 3)
+            # MediaPipe pose: landmark 11 = left shoulder, landmark 12 = right shoulder
+            mid_shoulder = (pose[:, 11:12, :] + pose[:, 12:13, :]) / 2.0  # (frames, 1, 3)
+            detected = (mid_shoulder.abs().sum(dim=-1, keepdim=True) > 1e-6)
+            pose = pose - mid_shoulder * detected.float()
+            features[:, pose_start:pose_start + 99] = pose.view(frames, 99)
+
+        return features
     
     def preprocess_all(self, num_workers: int = 4):
         """

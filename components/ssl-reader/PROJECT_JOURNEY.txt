@@ -1,0 +1,417 @@
+================================================================================
+  INTELLIGENT SINHALA SIGN LANGUAGE - SSL-READER COMPONENT
+  Complete Development Journey & Debugging Log
+  Developer: IT22304674 - Liyanage M.L.I.S.
+  Last Updated: March 6, 2026
+================================================================================
+
+GOAL: Achieve 70-75% test accuracy on SSL400 dataset (227 classes, 2,623 videos)
+HARDWARE: NVIDIA GeForce MX350 (2GB VRAM), Windows
+STACK: Python 3.13 + PyTorch 2.7.1+cu118 + MediaPipe 0.10.31
+
+
+================================================================================
+PHASE 1 - BASELINE TRAINING (Multi-Stream Fusion Model)
+================================================================================
+
+WHAT WAS DONE:
+  - Built MultiStreamFusionModel with 3 streams: Hand TCN + Face TCN + Pose LSTM
+  - Implemented StreamSpecificAugmenter for per-stream augmentation
+  - Feature config: 1582 dims total (hands 126 + face 1457 + pose 99)
+    Note: This was old cached data from a previous run, not intentional
+
+OUTPUT / ACCURACY:
+  - Baseline (before multi-stream): 21.8% test accuracy
+  - After Multi-Stream Fusion model: 46% test accuracy
+  - Improvement: +24.2 percentage points
+
+ISSUE DISCOVERED - OLD CACHED DATA ("The Smoking Gun"):
+  - Checked cached .pkl feature files → found 1582 dims
+  - Expected: 457 dims (126 hands + 232 filtered face + 99 pose)
+  - Actual: 1582 dims (126 hands + 1457 face - OLD full 468-landmark extraction)
+  - Training had been running on WRONG features the entire time
+  - Pose dimensions were 0 in the old cache (pose was broken silently)
+
+FIX:
+  - Deleted old cache: data/processed/mediapipe_normalized/
+  - Reconfigured feature extractor to balanced 457 dims:
+      Hands: 126 dims  (2 hands × 21 landmarks × 3 coords)
+      Face:  232 dims  (60 key landmarks × 3 + 52 blendshapes)
+      Pose:   99 dims  (33 landmarks × 3)
+      Total: 457 dims
+
+
+================================================================================
+PHASE 2 - DATA STARVATION PROBLEM
+================================================================================
+
+CONTEXT:
+  - SSL400 dataset: 227 classes, only ~11 videos per class
+  - This is EXTREME data starvation for deep learning
+  - Model had ~2.29M parameters to learn from ~11 samples/class
+
+WHAT WAS DONE:
+  - Implemented temporal augmentation:
+      * Time warping (stretching/compressing sequences)
+      * Frame drop (randomly removing frames)
+      * Time masking (zeroing out random time segments)
+  - Added aggressive regularization: dropout=0.5, weight_decay=1e-4
+  - Tried to extract pose features → encountered 404 error on MediaPipe pose model URL
+
+ISSUE - POSE MODEL URL 404:
+  - MediaPipe pose model download URL returned 404 (model moved/deprecated)
+  - Fix: Updated to correct MediaPipe model URL in preprocessing_mediapipe.py
+
+ISSUE - DATALOADER DEADLOCK ON WINDOWS:
+  - Training would start then CPU drops to 0%, complete freeze
+  - Root cause: MediaPipe uses multiprocessing internally
+  - When PyTorch DataLoader (num_workers > 0) spawns workers on Windows,
+    MediaPipe's internal processes conflict → deadlock
+  - Symptom: Training never progresses past first batch
+
+FIX - PRE-EXTRACTION PIPELINE:
+  - Created preprocess_features.py to extract ALL features BEFORE training
+  - Runs sequentially (single process), no DataLoader conflict
+  - Saves each video's features as .pkl file in data/processed/mediapipe_normalized/
+  - During training, DataLoader just reads pkl files (no MediaPipe needed)
+  - Set num_workers=0 in DataLoader as extra safety
+
+EXTRACTION RUN:
+  - Processed: 2,623 videos
+  - Time taken: ~2 hours 4 minutes
+  - Failures: 0
+  - Feature dims confirmed: 457 per video
+
+
+================================================================================
+PHASE 3 - FIRST PROPER TRAINING RUN (457-dim features)
+================================================================================
+
+TRAINING CONFIG:
+  - Features: 457 dims (hands 126 + face 232 + pose 99)
+  - Model: MultiStreamFusionModel (2.29M params)
+  - Epochs: 100
+  - Batch size: 16
+  - Dropout: 0.5
+  - Weight decay: 1e-4
+  - Optimizer: Adam with ReduceLROnPlateau scheduler
+
+OUTPUT / ACCURACY:
+  - Training accuracy:   ~39%  (train)
+  - Validation accuracy: ~38%  (val)
+  - Test accuracy:       ~24%  (test)
+  - Train-Val gap:       ~1%   (almost no overfitting)
+
+PROBLEM IDENTIFIED - UNDERFITTING:
+  - Train acc only 39% means the model couldn't learn the training data well
+  - Train-Val gap of 1% means regularization is TOO aggressive
+  - The model was being prevented from learning by excessive dropout/weight_decay
+  - A model that can't fit training data will never generalise well
+  - Root cause: dropout=0.5 + weight_decay=1e-4 + 3-layer classifier = too much
+
+DIAGNOSIS: Underfitting (not overfitting)
+  - Previous 46% result came from old 1582-dim features (richer face info)
+  - New 457-dim features are sparser, need lighter regularization
+  - 3-layer classifier (512→256→128→227) was too deep for this problem
+
+
+================================================================================
+PHASE 4 - DIAGNOSTIC ABLATION ("STRIP BACK TO BARE ESSENTIALS")
+================================================================================
+
+PHILOSOPHY (User's Direction):
+  "When a complex system breaks, you don't add more complex code to fix it.
+   You strip it back to the bare essentials and prove the fundamentals work first."
+
+DIAGNOSTIC PLAN:
+  - Disable blendshapes (face: 232 → 180 dims, spatial coordinates only)
+  - Disable pose (99 → 0 dims)
+  - Target: 306 dims = 126 hands + 180 filtered face (60 landmarks × 3)
+  - Prove hand + filtered-face spatial architecture works FIRST
+  - Then add blendshapes back → then add pose back (one variable at a time)
+
+CHANGES MADE:
+
+  1. preprocessing_mediapipe.py:
+     - Added use_blendshapes parameter (default: False for diagnostic)
+     - Changed use_pose default to False
+     - _process_face_landmarks() respects use_blendshapes flag
+     - get_feature_dim() correctly returns 306 when pose=False, blendshapes=False
+
+  2. models.py:
+     - Changed face_dim default: 232 → 180
+     - Changed pose_dim default: 99 → 0
+     - Changed use_pose default: True → False
+     - Changed classifier: 3-layer (512→256→128→227) → 2-layer (512→256→227)
+     - Reduced dropout: 0.5 → 0.3
+
+  3. train_mediapipe.py:
+     - Added --use_blendshapes argument (default: False)
+     - Changed --use_pose default: True → False
+     - Updated face_dim_val calculation to use bs_dim
+
+  4. preprocess_features.py:
+     - Set use_blendshapes=False, use_pose=False for diagnostic extraction
+
+CACHE DELETION AND RE-EXTRACTION:
+  - Deleted old 457-dim cache
+  - Re-extracted all 2,623 videos with 306-dim config
+  - Confirmed all files: shape=(60, 306)
+
+ISSUE - FACE_DIM MISMATCH BUG:
+  - Training log showed: "Face: 240 dims" but expected 180 dims
+  - Root cause: In model creation code, face_dim was hardcoded as 60*3 + 52 = 232
+    regardless of --use_blendshapes flag
+  - Fix: Changed to face_dim_val = 60*3 + bs_dim where bs_dim=0 when no blendshapes
+
+OUTPUT / ACCURACY - CATASTROPHIC:
+  - Validation accuracy: 6.14%  (peaked at epoch 9)
+  - Test accuracy:       2.0%
+  - This was WORSE than random chance (~0.44% for 227 classes... wait, 6% > random)
+  - But far worse than any previous run
+
+  Checkpoint history:
+    checkpoint_best.pth:   epoch=9,  val_acc=0.06143 (6.14%)
+    checkpoint_latest.pth: epoch=24, val_acc=0.04778 (4.78%)  ← degraded!
+
+
+================================================================================
+PHASE 5 - ROOT CAUSE ANALYSIS OF 6% CATASTROPHE
+================================================================================
+
+INVESTIGATION:
+  - Checked cache: 2,623 files, all (60, 306), data looks valid
+  - Hand part mean: ~0.04-0.18 (non-zero, meaningful values)
+  - Face part mean: ~0.01-0.17 (mostly non-zero)
+  - Only 1/20 random files had face=0 (some videos have no face detected - normal)
+
+  - Checked checkpoints: val peaked at epoch 9 then DECLINED to epoch 24
+    → This is classic OVERFITTING pattern, not data corruption
+
+  - The model memorized 11 training samples/class then failed on val/test
+
+REAL ROOT CAUSE - THREE COMBINED BUGS:
+
+  BUG 1: face_dim_val hardcoded to 232 in dataset/augmenter creation
+  -------
+  In train_mediapipe.py, the first face_dim_val calculation (for datasets):
+    face_dim_val = 60*3 + 52  # 232 (filtered)   ← WRONG, ignores use_blendshapes
+  But the second (for model creation) was correct:
+    face_dim_val = 60*3 + bs_dim  # 180 or 232
+  So StreamSpecificAugmenter was created with face_dim=232 but actual features
+  were 180-dim. The augmenter was configured wrong.
+
+  BUG 2: _augment_face_stream silently skipped 180-dim faces
+  -----------------------------------------------------------
+  In augmentation.py, _augment_face_stream had:
+    if face_dim >= 1404:  # 468 × 3 = full face
+        # ... augmentation logic
+    return face_features  # ← returned unchanged if face_dim < 1404!
+
+  So for face_dim=180 (or 232), NO augmentation was applied to face features.
+  This meant the model saw identical face features for each training video on
+  every epoch → less diversity → faster memorization → overfitting
+
+  BUG 3: Regularization reduced too aggressively
+  -----------------------------------------------
+  Changed from: dropout=0.5, weight_decay=1e-4  (38% run)
+  Changed to:   dropout=0.3, weight_decay=1e-5  (6% run)
+  
+  With only 11 samples/class, the weaker regularization allowed the model
+  to memorize the training set completely (overfitting)
+  Combined with zero face augmentation → catastrophic collapse on validation
+
+
+================================================================================
+PHASE 6 - FIXES APPLIED (Current State - March 6, 2026)
+================================================================================
+
+FIX 1: face_dim_val Bug in train_mediapipe.py
+----------------------------------------------
+  BEFORE:
+    face_dim_val = 60*3 + 52  # 232 (filtered) - ALWAYS 232
+
+  AFTER:
+    bs_dim_aug = 52 if args.use_blendshapes else 0
+    face_dim_val = 60*3 + bs_dim_aug  # 180 or 232 depending on config
+
+  Effect: StreamSpecificAugmenter now gets the CORRECT face_dim=180
+
+FIX 2: _augment_face_stream in augmentation.py
+-----------------------------------------------
+  Added two new cases BEFORE the existing 468-landmark block:
+
+  if face_dim == 180:  # 60 filtered landmarks, spatial only
+      landmarks_3d = face_features.view(frames, 60, 3)
+      if random.random() < 0.65: apply rotation (±3°)
+      if random.random() < 0.65: apply scale (0.95–1.05)
+      if random.random() < 0.75: apply noise (std=0.001)
+      apply temporal shift with probability
+      return face_features
+
+  elif face_dim == 232:  # 60 filtered landmarks + 52 blendshapes
+      # Split: augment landmarks (0:180), keep blendshapes (180:232) unchanged
+      # Apply same rotation/scale/noise to landmark part
+      # Recombine and return
+
+  The existing 468-landmark (>=1404 dim) code is preserved as-is.
+
+  VERIFIED: StreamSpecificAugmenter test with (60, 306) input:
+    - Input:  torch.Size([60, 306])
+    - Output: torch.Size([60, 306])
+    - Face part changed: True  ✓ (augmentation now active)
+    - 457-dim (232 face) also tested: Face part changed: True  ✓
+
+FIX 3: Regularization Restored
+--------------------------------
+  In models.py (MultiStreamFusionModel creation):
+    dropout: 0.3 → 0.5
+
+  In train_mediapipe.py CLI defaults:
+    weight_decay: 1e-5 → 1e-4
+
+  In train() method signature:
+    weight_decay default: 1e-4 (already correct, confirmed)
+
+
+================================================================================
+CURRENT STATE & WHAT TO EXPECT NEXT
+================================================================================
+
+CURRENT FEATURE CONFIG:
+  - Hands:  126 dims (21 landmarks × 2 hands × 3 coords)
+  - Face:   180 dims (60 key landmarks × 3 coords, NO blendshapes)
+  - Pose:     0 dims (disabled)
+  - Total:  306 dims
+  - Cache:  2,623 files at (60, 306) - READY TO TRAIN
+
+CURRENT MODEL CONFIG:
+  - Architecture: MultiStreamFusionModel
+  - Hand stream:  TCN [64, 128, 128] → 128 output
+  - Face stream:  TCN [128, 256, 256] → 256 output
+  - Fusion:       AttentionFusion → 512 dim
+  - Classifier:   512 → 256 → 227 (2-layer)
+  - Dropout:      0.5
+  - Parameters:   ~2.29M
+
+TRAINING COMMAND:
+  (activate venv first)
+  G:\research\...\venv\Scripts\activate
+  cd G:\research\...\components\ssl-reader
+  python src/train_mediapipe.py ^
+    --dataset_root G:\research\...\datasets\signVideo ^
+    --cache_dir data/processed/mediapipe_normalized ^
+    --model_type multistream ^
+    --batch_size 16 ^
+    --num_epochs 100 ^
+    --device cuda
+
+EXPECTED OUTCOME (Diagnostic 306-dim run):
+  - Dropout=0.5 + weight_decay=1e-4 should prevent overfitting
+  - Face augmentation now ACTIVE → more training diversity
+  - Expected val accuracy: 25–40%
+  - If achieved: Proves hands + filtered-face-spatial architecture works
+
+NEXT STEPS AFTER SUCCESSFUL DIAGNOSTIC:
+  Step 1: Add blendshapes back
+    → face_dim: 180 → 232 (60 landmarks × 3 + 52 blendshapes)
+    → total: 306 → 358 dims
+    → Expected improvement: +3–8%
+
+  Step 2: Add pose back
+    → pose_dim: 0 → 99 (33 landmarks × 3)
+    → total: 358 → 457 dims
+    → Expected improvement: +3–5%
+
+  Step 3: Tune hyperparameters
+    → LR schedule, batch size, model capacity
+    → Target: 55–65% val accuracy
+
+  GOAL: 70–75% test accuracy
+
+
+================================================================================
+ACCURACY PROGRESSION TIMELINE
+================================================================================
+
+  Run 1 (Baseline, wrong features):     Baseline ~21.8% test
+  Run 2 (Multi-stream, old 1582-dim):       46.0% test  ← best so far, but wrong features
+  Run 3 (Balanced 457-dim, underfit):       24.0% test, 38.0% val  
+                                            (train=39%, val=38% → underfitting)
+  Run 4 (Diagnostic 306-dim, overfit):       2.0% test,  6.1% val  
+                                            (5% val peak then collapsing → overfitting)
+  Run 5 (Current - fixes applied):         PENDING
+
+
+================================================================================
+FILES MODIFIED ACROSS ALL PHASES
+================================================================================
+
+  src/preprocessing_mediapipe.py
+    - Added: use_blendshapes parameter
+    - Added: use_pose=False default
+    - Added: use_blendshapes=False default
+    - Fixed: _process_face_landmarks() respects use_blendshapes
+    - Fixed: get_feature_dim() returns 306 when pose=False, blendshapes=False
+
+  src/augmentation.py
+    - FIXED: _augment_face_stream() - added face_dim==180 handling
+    - FIXED: _augment_face_stream() - added face_dim==232 handling
+    - Previous 468-landmark code preserved as fallback
+
+  src/models.py
+    - Changed: face_dim default 232 → 180
+    - Changed: pose_dim default 99 → 0
+    - Changed: use_pose default True → False
+    - Changed: classifier 3-layer → 2-layer (removed underfitting bottleneck)
+    - Changed: dropout default 0.3 → 0.5
+
+  src/train_mediapipe.py
+    - Added: --use_blendshapes CLI argument (default: False)
+    - Changed: --use_pose default True → False
+    - FIXED: face_dim_val for dataset/augmenter (was hardcoded 232, now uses bs_dim)
+    - Changed: dropout 0.3 → 0.5 in model creation
+    - Changed: --weight_decay default 1e-5 → 1e-4
+
+  src/preprocess_features.py (NEW FILE)
+    - Purpose: Pre-extract all 2,623 video features before training
+    - Solves: MediaPipe + DataLoader deadlock on Windows
+    - Config: use_pose=False, use_blendshapes=False (306-dim)
+    - Status: Already run, 2,623 files extracted successfully
+
+
+================================================================================
+KEY LESSONS LEARNED
+================================================================================
+
+1. ALWAYS verify cache dims before training
+   - Old cache silently passed wrong features to the model
+   - The 46% result was on 1582-dim features (not the intended 457-dim)
+   - Always print feature_dim at start of training and verify against expected
+
+2. Windows + MediaPipe + PyTorch DataLoader = deadlock
+   - Set num_workers=0 is not enough if MediaPipe runs during __getitem__
+   - Solution: Pre-extract ALL features to .pkl files first
+   - DataLoader then only does file I/O (no MediaPipe), safe with any num_workers
+
+3. Underfitting vs Overfitting diagnosis
+   - Underfitting: train_acc ≈ val_acc, both LOW → model can't learn
+     Fix: reduce regularization, simplify architecture
+   - Overfitting: train_acc HIGH, val_acc LOW (and declining) → memorizing
+     Fix: increase dropout, weight_decay; add augmentation
+
+4. Data augmentation for 11 samples/class is CRITICAL
+   - Without face augmentation, face features were identical every epoch
+   - Same 11 faces × 100 epochs = model memorizes exact face patterns
+   - With augmentation, each epoch sees slightly different rotated/scaled faces
+   - Effective dataset size increases dramatically with good augmentation
+
+5. Ablation approach for debugging
+   - "Strip back to bare essentials first"
+   - Disable pose, blendshapes → prove basic hand+face works
+   - Then re-add features one at a time
+   - This isolates which component is causing problems
+
+================================================================================
+END OF DOCUMENT
+================================================================================

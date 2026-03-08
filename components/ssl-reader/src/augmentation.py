@@ -105,10 +105,10 @@ class SkeletonAugmenter:
         scale_range: Tuple[float, float] = (0.9, 1.1),
         noise_std: float = 0.002,
         temporal_shift_prob: float = 0.3,
-        time_warp_prob: float = 0.5,
-        frame_drop_prob: float = 0.4,
-        time_mask_prob: float = 0.3,
-        apply_prob: float = 0.8
+        time_warp_prob: float = 0.25,   # Reduced from 0.5 (was causing underfitting)
+        frame_drop_prob: float = 0.2,   # Reduced from 0.4
+        time_mask_prob: float = 0.15,   # Reduced from 0.3
+        apply_prob: float = 0.7
     ):
         """
         Initialize augmenter.
@@ -596,7 +596,12 @@ class StreamSpecificAugmenter:
         """
         # Clone to avoid modifying original
         augmented = features.clone()
-        
+
+        # Apply horizontal flip with 50% probability (mirrors sign & swaps hands)
+        # Must happen before stream-specific augmentation so rotations are consistent
+        if random.random() < 0.5:
+            augmented = self._apply_horizontal_flip(augmented)
+
         # Augment hand stream (indices 0:126)
         if self.hand_dim > 0:
             hand_features = augmented[:, :self.hand_dim]
@@ -621,6 +626,42 @@ class StreamSpecificAugmenter:
         
         return augmented
     
+    def _apply_horizontal_flip(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        Mirror the signer by flipping all X coordinates and swapping hand slots.
+        Effectively doubles training data since mirrored signs are still valid.
+
+        Layout: [hands(0:hand_dim), face(hand_dim:hand_dim+face_dim), pose(rest)]
+        - Hands: flip X coords then swap hand-0 ↔ hand-1 buffers
+        - Face: flip X coords of the 60 spatial landmarks (not blendshapes)
+        - Pose: flip X coords of all 33 landmarks
+        """
+        frames = features.shape[0]
+        flipped = features.clone()
+
+        # --- Flip + swap hands ---
+        if self.hand_dim == 126:
+            hands = flipped[:, :126].view(frames, 2, 21, 3)
+            hands[:, :, :, 0] = 1.0 - hands[:, :, :, 0]  # Mirror X
+            hands = hands[:, [1, 0], :, :]                 # Swap left ↔ right slots
+            flipped[:, :126] = hands.view(frames, 126)
+
+        # --- Flip face landmark X (first 180 dims only, skip blendshapes) ---
+        if self.face_dim >= 180:
+            face_start = self.hand_dim
+            face_lm = flipped[:, face_start:face_start + 180].view(frames, 60, 3)
+            face_lm[:, :, 0] = 1.0 - face_lm[:, :, 0]
+            flipped[:, face_start:face_start + 180] = face_lm.view(frames, 180)
+
+        # --- Flip pose X ---
+        if self.use_pose and self.pose_dim == 99:
+            pose_start = self.hand_dim + self.face_dim
+            pose = flipped[:, pose_start:pose_start + 99].view(frames, 33, 3)
+            pose[:, :, 0] = 1.0 - pose[:, :, 0]
+            flipped[:, pose_start:pose_start + 99] = pose.view(frames, 99)
+
+        return flipped
+
     def _augment_hand_stream(self, hand_features: torch.Tensor) -> torch.Tensor:
         """Augment hand features with aggressive transformations."""
         frames = hand_features.shape[0]
@@ -660,7 +701,45 @@ class StreamSpecificAugmenter:
     def _augment_face_stream(self, face_features: torch.Tensor) -> torch.Tensor:
         """Augment face features with conservative transformations."""
         frames, face_dim = face_features.shape
-        
+
+        # --- 60 key-landmark filtered face (spatial only, no blendshapes) ---
+        if face_dim == 180:
+            landmarks_3d = face_features.view(frames, 60, 3)
+            if random.random() < 0.65:
+                landmarks_3d = self._rotate_landmarks(
+                    landmarks_3d, self.face_augmenter.rotation_range)
+            if random.random() < 0.65:
+                landmarks_3d = self._scale_landmarks(
+                    landmarks_3d, self.face_augmenter.scale_range)
+            if random.random() < 0.75:
+                landmarks_3d = self._add_noise_to_landmarks(
+                    landmarks_3d, self.face_augmenter.noise_std)
+            face_features = landmarks_3d.view(frames, 180)
+            if random.random() < self.face_augmenter.temporal_shift_prob:
+                face_features = self.face_augmenter._apply_temporal_shift(face_features)
+            return face_features
+
+        # --- 60 key-landmark filtered face + 52 blendshapes ---
+        if face_dim == 232:
+            landmark_part = face_features[:, :180].clone()
+            blendshape_part = face_features[:, 180:]
+            landmarks_3d = landmark_part.view(frames, 60, 3)
+            if random.random() < 0.65:
+                landmarks_3d = self._rotate_landmarks(
+                    landmarks_3d, self.face_augmenter.rotation_range)
+            if random.random() < 0.65:
+                landmarks_3d = self._scale_landmarks(
+                    landmarks_3d, self.face_augmenter.scale_range)
+            if random.random() < 0.75:
+                landmarks_3d = self._add_noise_to_landmarks(
+                    landmarks_3d, self.face_augmenter.noise_std)
+            face_features = torch.cat(
+                [landmarks_3d.view(frames, 180), blendshape_part], dim=1)
+            if random.random() < self.face_augmenter.temporal_shift_prob:
+                face_features = self.face_augmenter._apply_temporal_shift(face_features)
+            return face_features
+
+        # --- Full 468-landmark face (legacy / full mode) ---
         # Split face landmarks and blendshapes
         # Landmarks: 0:1404 (468 × 3)
         # Blendshapes: 1404:1456 (52)

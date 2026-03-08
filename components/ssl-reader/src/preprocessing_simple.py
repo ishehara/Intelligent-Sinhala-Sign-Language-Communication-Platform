@@ -262,11 +262,15 @@ def create_dataset_splits(
     
     for label, video_paths in categories.items():
         n_videos = len(video_paths)
-        n_train = int(n_videos * train_ratio)
-        n_val = int(n_videos * val_ratio)
         
-        # Shuffle videos
-        np.random.shuffle(video_paths)
+        # Shuffle videos (fixed seed for reproducibility)
+        rng = np.random.default_rng(seed=42)
+        rng.shuffle(video_paths)
+        
+        # Guarantee at least 2 val samples and 2 test samples per class.
+        # int(11 * 0.15) = 1 — only 1 val sample/class makes early stopping unreliable.
+        n_val = max(2, int(n_videos * val_ratio))
+        n_train = max(1, n_videos - n_val * 2)  # symmetric: equal val and test size
         
         # Split
         train_vids = video_paths[:n_train]
