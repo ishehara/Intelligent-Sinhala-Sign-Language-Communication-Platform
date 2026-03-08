@@ -185,44 +185,120 @@ FEEDBACK_TEMPLATES: Dict[str, Dict] = {
 }
 
 # ══════════════════════════════════════════════════════════════
-# Hard Constraint Map (mirrors simulator logic)
+# Soft Constraint Mask  (replaces hard-blocking)
 # ══════════════════════════════════════════════════════════════
 
-def _get_valid_actions(consecutive_failures: int) -> List[str]:
+def _compute_action_mask(consecutive_failures: int) -> Dict[str, float]:
     """
-    Return the valid action set given current frustration level.
-    Matches the simulator's proven constraint rules:
-      ≥ 5 failures: only supportive/escape actions
-      ≥ 3 failures: no encouraging (does more harm than good)
+    Soft-constraint mask: instead of hard-blocking actions, each action
+    gets a multiplicative weight on its Thompson sample.
+
+    Weight = 1.0 → no penalty.
+    Weight → 0   → strongly suppressed, BUT the learned Beta posterior
+                    can still override if it has enough positive evidence.
+
+    This lets the agent DISCOVER constraints from reward signals while
+    still starting with sensible safety priors from simulation data.
     """
+    mask = {a: 1.0 for a in ACTIONS}
     if consecutive_failures >= 5:
-        return ['video_demo', 'skip_option', 'break_suggestion']
-    if consecutive_failures >= 3:
-        return [a for a in ACTIONS if a != 'encouraging']
-    return ACTIONS
+        mask['encouraging'] = 0.05
+        mask['corrective'] = 0.20
+        mask['hint'] = 0.20
+    elif consecutive_failures >= 3:
+        mask['encouraging'] = 0.15
+    return mask
 
 
 # ══════════════════════════════════════════════════════════════
-# Context Classifier
+# Adaptive Context Thresholds
 # ══════════════════════════════════════════════════════════════
 
-def _classify_context(
-    consecutive_failures: int,
-    confidence: float,
-    is_correct: bool,
-    attempt_count: int,
-    success_rate_last5: float,
-) -> str:
-    """Map real-time user metrics to one of the 5 context buckets."""
-    if consecutive_failures >= 3:
-        return 'frustrated'
-    if attempt_count <= 2:
-        return 'learning'
-    if confidence < 0.40 and not is_correct:
-        return 'struggling'
-    if success_rate_last5 > 0.70 and confidence >= 0.75:
-        return 'confident'
-    return 'normal'
+class AdaptiveContextThresholds:
+    """
+    Context classification with thresholds that adapt from reward signals.
+
+    Instead of fixed rules (failures≥3 → frustrated, conf<0.40 → struggling),
+    these boundaries shift when a classification consistently leads to poor
+    rewards (wrong context → bad feedback → user gives up → negative reward).
+    """
+
+    def __init__(self):
+        self.frustration_failures: float = 3.0
+        self.struggling_conf: float = 0.40
+        self.learning_max_attempts: float = 2.0
+        self.confident_success_rate: float = 0.70
+        self.confident_conf: float = 0.75
+
+        self._lr = 0.01  # learning rate for threshold nudges
+        self._context_rewards: Dict[str, List[float]] = {c: [] for c in CONTEXTS}
+
+    def classify(self, consecutive_failures: int, confidence: float,
+                 is_correct: bool, attempt_count: int,
+                 success_rate_last5: float) -> str:
+        """Classify user state using adaptive thresholds."""
+        if consecutive_failures >= self.frustration_failures:
+            return 'frustrated'
+        if attempt_count <= self.learning_max_attempts:
+            return 'learning'
+        if confidence < self.struggling_conf and not is_correct:
+            return 'struggling'
+        if (success_rate_last5 > self.confident_success_rate
+                and confidence >= self.confident_conf):
+            return 'confident'
+        return 'normal'
+
+    def update(self, context: str, reward: float):
+        """Nudge thresholds based on reward — gradient-free boundary adaptation."""
+        self._context_rewards[context].append(reward)
+        if len(self._context_rewards[context]) > 200:
+            self._context_rewards[context] = self._context_rewards[context][-200:]
+
+        recent = self._context_rewards[context][-20:]
+        if len(recent) < 5:
+            return
+
+        avg = float(np.mean(recent))
+
+        # Poor reward → relax this context (fewer users classified here)
+        if avg < -0.2:
+            if context == 'frustrated':
+                self.frustration_failures = min(5.0, self.frustration_failures + self._lr * 3)
+            elif context == 'struggling':
+                self.struggling_conf = max(0.20, self.struggling_conf - self._lr * 2)
+            elif context == 'confident':
+                self.confident_success_rate = min(0.90, self.confident_success_rate + self._lr)
+        # Good reward → widen this context (capture more users)
+        elif avg > 0.5:
+            if context == 'frustrated':
+                self.frustration_failures = max(2.0, self.frustration_failures - self._lr)
+            elif context == 'struggling':
+                self.struggling_conf = min(0.55, self.struggling_conf + self._lr)
+            elif context == 'confident':
+                self.confident_success_rate = max(0.55, self.confident_success_rate - self._lr)
+
+    def to_dict(self) -> dict:
+        return {
+            'frustration_failures': round(self.frustration_failures, 3),
+            'struggling_conf': round(self.struggling_conf, 3),
+            'learning_max_attempts': round(self.learning_max_attempts, 3),
+            'confident_success_rate': round(self.confident_success_rate, 3),
+            'confident_conf': round(self.confident_conf, 3),
+            'context_avg_rewards': {
+                c: round(float(np.mean(rs[-20:])), 3) if rs else 0.0
+                for c, rs in self._context_rewards.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'AdaptiveContextThresholds':
+        t = cls()
+        t.frustration_failures = d.get('frustration_failures', 3.0)
+        t.struggling_conf = d.get('struggling_conf', 0.40)
+        t.learning_max_attempts = d.get('learning_max_attempts', 2.0)
+        t.confident_success_rate = d.get('confident_success_rate', 0.70)
+        t.confident_conf = d.get('confident_conf', 0.75)
+        return t
 
 
 # ══════════════════════════════════════════════════════════════
@@ -276,6 +352,17 @@ class ThompsonFeedbackAgent:
         self.total_rewards = 0.0
         self.reward_history: List[float] = []
 
+        # Adaptive context thresholds (learned from reward signals)
+        self.context_thresholds = AdaptiveContextThresholds()
+
+        # Per-context per-action reward tracking
+        self.context_action_rewards: Dict[str, Dict[str, List[float]]] = {
+            ctx: {a: [] for a in ACTIONS} for ctx in CONTEXTS
+        }
+
+        # Policy evolution history (snapshots every 25 updates)
+        self.policy_history: List[dict] = []
+
         # Persistence
         self.save_path = save_path or os.path.join(
             os.path.dirname(__file__), 'rl_thompson_params.json'
@@ -286,18 +373,25 @@ class ThompsonFeedbackAgent:
     # Core Thompson Sampling
     # ─────────────────────────────────────────────────────────
 
-    def _sample_action(self, context: str, valid_actions: List[str]) -> str:
+    def _sample_action(self, context: str,
+                       action_mask: Dict[str, float] = None) -> str:
         """
-        Draw θ ~ Beta(α, β) for each valid action and return argmax.
-        This is pure Thompson Sampling — no extra exploration parameter needed.
+        Draw θ ~ Beta(α, β) for EVERY action, apply soft-constraint mask,
+        and return argmax.
+
+        No actions are ever hard-blocked — the mask only suppresses.
+        If the Beta posterior is strong enough (high α from positive rewards),
+        the agent CAN override the mask, i.e. it learns its own constraints.
         """
-        samples = {
-            action: float(np.random.beta(
+        samples = {}
+        for action in ACTIONS:
+            theta = float(np.random.beta(
                 self.alpha[context][action],
                 self.beta[context][action],
             ))
-            for action in valid_actions
-        }
+            if action_mask:
+                theta *= action_mask.get(action, 1.0)
+            samples[action] = theta
         return max(samples, key=samples.get)
 
     def _update_params(self, context: str, action: str, reward: float):
@@ -320,6 +414,18 @@ class ThompsonFeedbackAgent:
         self.reward_history.append(reward)
         if len(self.reward_history) > 500:
             self.reward_history.pop(0)
+
+        # Track per-context per-action rewards
+        self.context_action_rewards[context][action].append(reward)
+        if len(self.context_action_rewards[context][action]) > 200:
+            self.context_action_rewards[context][action] = \
+                self.context_action_rewards[context][action][-200:]
+
+        # Adapt context thresholds based on reward signal
+        self.context_thresholds.update(context, reward)
+
+        # Record policy snapshot periodically
+        self._record_policy_snapshot()
 
         if self.total_updates % 10 == 0:
             self._save()
@@ -355,8 +461,8 @@ class ThompsonFeedbackAgent:
             rl_state         list  raw state vector [failures, conf, correct, attempts]
             rl_epsilon       float always 0.0 (TS needs no ε — here for API compat)
         """
-        # 1. Classify context
-        context = _classify_context(
+        # 1. Classify context using adaptive thresholds
+        context = self.context_thresholds.classify(
             consecutive_failures=consecutive_failures,
             confidence=confidence,
             is_correct=is_correct,
@@ -364,14 +470,14 @@ class ThompsonFeedbackAgent:
             success_rate_last5=success_rate_last5,
         )
 
-        # 2. Apply hard constraints
-        valid_actions = _get_valid_actions(consecutive_failures)
+        # 2. Compute soft-constraint mask (no hard blocking)
+        action_mask = _compute_action_mask(consecutive_failures)
 
         # 3. If hand not detected, force corrective guidance
         if not hand_detected:
             action = 'corrective'
         else:
-            action = self._sample_action(context, valid_actions)
+            action = self._sample_action(context, action_mask)
 
         # 4. Format message
         sign_label = expected_label or predicted_label
@@ -504,6 +610,8 @@ class ThompsonFeedbackAgent:
             'active_sessions': len(self.session_memory),
             'num_actions': len(ACTIONS),
             'num_contexts': len(CONTEXTS),
+            'context_thresholds': self.context_thresholds.to_dict(),
+            'policy_snapshots': len(self.policy_history),
             # Best action per context (highest mean of Beta = α / (α+β))
             'policy_summary': {
                 ctx: max(
@@ -532,6 +640,77 @@ class ThompsonFeedbackAgent:
         return policy
 
     # ─────────────────────────────────────────────────────────
+    # Policy Evolution Tracking
+    # ─────────────────────────────────────────────────────────
+
+    def _record_policy_snapshot(self):
+        """Snapshot current policy every 25 updates for evolution tracking."""
+        if self.total_updates % 25 != 0:
+            return
+        snapshot = {
+            'update': self.total_updates,
+            'timestamp': time.time(),
+            'avg_reward_last50': round(
+                float(np.mean(self.reward_history[-50:]))
+                if self.reward_history else 0, 4
+            ),
+            'thresholds': self.context_thresholds.to_dict(),
+            'policy': {},
+        }
+        for ctx in CONTEXTS:
+            means = {}
+            for a in ACTIONS:
+                al = self.alpha[ctx][a]
+                be = self.beta[ctx][a]
+                means[a] = round(al / (al + be), 4)
+            best = max(means, key=means.get)
+            snapshot['policy'][ctx] = {
+                'best_action': best,
+                'action_probs': means,
+            }
+        self.policy_history.append(snapshot)
+        if len(self.policy_history) > 100:
+            self.policy_history = self.policy_history[-100:]
+
+    def get_policy_evolution(self) -> dict:
+        """
+        Return full policy evolution data for research visualization.
+        Shows: how Beta distributions, context thresholds, and preferred
+        actions have changed over the agent's lifetime.
+        """
+        return {
+            'total_updates': self.total_updates,
+            'total_snapshots': len(self.policy_history),
+            'current_thresholds': self.context_thresholds.to_dict(),
+            'current_policy': self.get_context_policy(),
+            'evolution': self.policy_history,
+            'context_action_stats': {
+                ctx: {
+                    a: {
+                        'alpha': round(self.alpha[ctx][a], 2),
+                        'beta': round(self.beta[ctx][a], 2),
+                        'mean': round(
+                            self.alpha[ctx][a]
+                            / (self.alpha[ctx][a] + self.beta[ctx][a]), 4
+                        ),
+                        'samples': len(
+                            self.context_action_rewards.get(ctx, {}).get(a, [])
+                        ),
+                        'avg_reward': round(
+                            float(np.mean(
+                                self.context_action_rewards[ctx][a][-50:]
+                            )), 3
+                        ) if self.context_action_rewards.get(
+                            ctx, {}
+                        ).get(a, []) else 0.0,
+                    }
+                    for a in ACTIONS
+                }
+                for ctx in CONTEXTS
+            },
+        }
+
+    # ─────────────────────────────────────────────────────────
     # Persistence
     # ─────────────────────────────────────────────────────────
 
@@ -543,6 +722,12 @@ class ThompsonFeedbackAgent:
             'total_updates': self.total_updates,
             'total_rewards': self.total_rewards,
             'reward_history': self.reward_history[-500:],
+            'policy_history': self.policy_history[-100:],
+            'context_thresholds': self.context_thresholds.to_dict(),
+            'context_action_rewards': {
+                ctx: {a: rs[-200:] for a, rs in acts.items()}
+                for ctx, acts in self.context_action_rewards.items()
+            },
         }
         try:
             with open(self.save_path, 'w') as f:
@@ -557,7 +742,7 @@ class ThompsonFeedbackAgent:
         try:
             with open(self.save_path, 'r') as f:
                 data = json.load(f)
-            # Restore, filling missing keys with defaults
+            # Restore Beta parameters, filling missing keys with defaults
             for ctx in CONTEXTS:
                 for action in ACTIONS:
                     self.alpha[ctx][action] = data.get('alpha', {}).get(ctx, {}).get(
@@ -569,8 +754,26 @@ class ThompsonFeedbackAgent:
             self.total_updates = data.get('total_updates', 0)
             self.total_rewards = data.get('total_rewards', 0.0)
             self.reward_history = data.get('reward_history', [])
+
+            # Restore adaptive context thresholds
+            if 'context_thresholds' in data:
+                self.context_thresholds = AdaptiveContextThresholds.from_dict(
+                    data['context_thresholds']
+                )
+
+            # Restore policy evolution history
+            self.policy_history = data.get('policy_history', [])
+
+            # Restore per-context-action rewards
+            car_data = data.get('context_action_rewards', {})
+            for ctx in CONTEXTS:
+                for a in ACTIONS:
+                    self.context_action_rewards[ctx][a] = \
+                        car_data.get(ctx, {}).get(a, [])
+
             print(f'📂 ThompsonFeedbackAgent loaded '
-                  f'({self.total_updates} updates)')
+                  f'({self.total_updates} updates, '
+                  f'{len(self.policy_history)} policy snapshots)')
         except Exception as e:
             print(f'⚠️  ThompsonFeedbackAgent load failed: {e}')
 
