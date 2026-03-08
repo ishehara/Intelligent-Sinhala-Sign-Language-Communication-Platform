@@ -24,3 +24,7 @@ seaborn>=0.12.0
 
 # Utilities
 tqdm>=4.65.0
+
+# API server (for mobile frontend integration)
+flask>=3.0.0
+flask-cors>=4.0.0
