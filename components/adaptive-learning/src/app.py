@@ -376,6 +376,7 @@ def index():
             "POST /unlocked-levels": "Get unlocked levels",
             "POST /practice-suggestions": "Get signs needing re-practice",
             "GET /thompson-stats": "Thompson sampling stats",
+            "GET /thompson-policy-evolution": "Thompson policy evolution data",
         },
     })
 
@@ -496,20 +497,28 @@ def predict_sign():
 
         attempt_count = data.get('attempt_count', 1)
 
-        # ── Confidence-based status (restored thresholds) ──
+        # ── Status logic: label match first, then confidence ──
         correction_tip = ""
         if expected:
-            if label == expected and conf >= 0.55:
-                status = "correct"
-                is_correct = True
-            elif conf < 0.45:
+            if label != expected:
+                # Wrong sign detected → always incorrect
                 status = "incorrect"
                 is_correct = False
                 correction_tip = SIGN_CORRECTION_FEEDBACK.get(expected, "")
-            else:
-                # 45% – 55% confidence zone
+            elif conf >= 0.55:
+                # Correct sign with good confidence
+                status = "correct"
+                is_correct = True
+            elif conf >= 0.45:
+                # Correct sign but low confidence → try again
                 status = "try_again"
                 is_correct = False
+                correction_tip = SIGN_CORRECTION_FEEDBACK.get(expected, "")
+            else:
+                # Correct sign but very low confidence
+                status = "incorrect"
+                is_correct = False
+                correction_tip = SIGN_CORRECTION_FEEDBACK.get(expected, "")
         else:
             status = "predicted"
             is_correct = True
@@ -869,19 +878,29 @@ def predict_video_sign():
 
         if predicted and expected:
             vid_conf = result['confidence']
-            if predicted == expected and vid_conf >= 0.55:
-                status = 'correct'
-                feedback = 'Correct Sign'
-                feedback_level = 'excellent'
-            elif vid_conf < 0.45:
+            if predicted != expected:
+                # Wrong sign detected → always incorrect
                 status = 'incorrect'
                 feedback = 'Incorrect Sign'
                 feedback_level = 'poor'
                 correction_tip = SIGN_CORRECTION_FEEDBACK.get(expected, '')
-            else:
+            elif vid_conf >= 0.55:
+                # Correct sign with good confidence
+                status = 'correct'
+                feedback = 'Correct Sign'
+                feedback_level = 'excellent'
+            elif vid_conf >= 0.45:
+                # Correct sign but low confidence → try again
                 status = 'try_again'
                 feedback = 'Try Again \u2013 Adjust Your Hand Position'
                 feedback_level = 'fair'
+                correction_tip = SIGN_CORRECTION_FEEDBACK.get(expected, '')
+            else:
+                # Correct sign but very low confidence
+                status = 'incorrect'
+                feedback = 'Incorrect Sign'
+                feedback_level = 'poor'
+                correction_tip = SIGN_CORRECTION_FEEDBACK.get(expected, '')
         elif predicted:
             status = 'predicted'
             feedback = f'Detected dynamic sign: {predicted}'
@@ -1060,6 +1079,18 @@ def thompson_stats():
     """Return Thompson sampling agent statistics."""
     if thompson_agent:
         return jsonify(thompson_agent.get_stats())
+    return jsonify({"error": "Thompson agent not loaded"}), 404
+
+
+@app.route('/thompson-policy-evolution', methods=['GET'])
+def thompson_policy_evolution():
+    """
+    Return Thompson agent policy evolution data for research visualization.
+    Shows how Beta distributions, context thresholds, and preferred actions
+    have changed over the agent's lifetime.
+    """
+    if thompson_agent:
+        return jsonify(thompson_agent.get_policy_evolution())
     return jsonify({"error": "Thompson agent not loaded"}), 404
 
 

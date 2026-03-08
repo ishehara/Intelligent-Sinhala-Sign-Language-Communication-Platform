@@ -541,23 +541,31 @@ class AdaptiveLearningAgent:
             action_idx = self.select_action(rl_state)
             action = ACTION_SPACE[action_idx]
 
-            # Compute priority score
+            # RL-driven priority: use learned Q-values to modulate urgency
+            # instead of fixed hardcoded weights.
+            # max_q represents how much reward the agent expects from its
+            # best action in this sign's state — higher = better strategy found.
+            q_values = self.q_table[str(rl_state)]
+            max_q = float(np.max(q_values)) if np.any(q_values != 0) else 0.0
+            # Sigmoid ∈ [0.3, 1.0]: ensures all signs get some priority,
+            # but signs where RL has found good strategies rank higher.
+            q_factor = 0.3 + 0.7 / (1.0 + np.exp(-max_q))
+
             priority = 0.0
 
-            # Due for review? (highest priority)
+            # Due for review — spaced repetition urgency scaled by RL confidence
             if state.is_due_for_review and state.total_attempts > 0:
-                priority += 10.0 + state.days_since_practice
+                priority += (6.0 + state.days_since_practice * 0.5) * q_factor
 
-            # Low mastery in current curriculum?
+            # Low mastery — RL confidence modulates how aggressively to push
             if state.mastery_level < 2:
-                priority += 5.0 - state.accuracy * 3
+                priority += (3.0 + (1.0 - state.accuracy) * 2.0) * q_factor
 
-            # New sign bonus
+            # New sign — introduce when RL baseline is ready
             if state.total_attempts == 0:
                 difficulty = SIGN_TO_DIFFICULTY.get(sign, 2)
-                # Only suggest new signs if prerequisites are met
                 if difficulty <= self._user_max_difficulty(user_id):
-                    priority += 3.0
+                    priority += 2.0 + q_factor
 
             candidates.append({
                 "sign": sign,
