@@ -40,12 +40,16 @@ class MediaPipeTrainer:
         model: nn.Module,
         device: torch.device,
         save_dir: Path,
-        log_dir: Path = None
+        log_dir: Path = None,
+        label_to_idx: dict = None,
+        idx_to_sinhala: dict = None
     ):
         self.model = model.to(device)
         self.device = device
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.label_to_idx = label_to_idx or {}
+        self.idx_to_sinhala = idx_to_sinhala or {}
         
         # TensorBoard writer
         self.writer = None
@@ -203,6 +207,9 @@ class MediaPipeTrainer:
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'val_acc': val_acc,
+            'label_to_idx': self.label_to_idx,
+            'idx_to_sinhala': self.idx_to_sinhala,
+            'num_classes': len(self.label_to_idx),
         }
         torch.save(checkpoint, self.save_dir / filename)
     
@@ -484,8 +491,24 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Model parameters: {total_params:,}")
     
+    # Load idx_to_sinhala from label_mapping.json (for embedding in checkpoint)
+    idx_to_sinhala = {}
+    label_map_candidates = [
+        workspace_root / 'datasets' / 'label_mapping.json',
+        project_root / 'data' / 'label_mapping.json',
+    ]
+    for lm_path in label_map_candidates:
+        if lm_path.exists():
+            with open(lm_path, 'r', encoding='utf-8') as f:
+                raw_lm = json.load(f)
+            idx_to_sinhala = raw_lm.get('idx_to_sinhala', {})
+            logger.info(f"Loaded {len(idx_to_sinhala)} Sinhala translations from {lm_path}")
+            break
+
     # Train
-    trainer = MediaPipeTrainer(model, device, save_dir, log_dir)
+    trainer = MediaPipeTrainer(model, device, save_dir, log_dir,
+                               label_to_idx=label_map,
+                               idx_to_sinhala=idx_to_sinhala)
     
     logger.info("Starting training...")
     trainer.train(
