@@ -244,8 +244,10 @@ def create_dataset_splits(
             sign_name = sign_dir.name
             full_label = f"{category_name}/{sign_name}"
             
-            # Collect video files
-            video_files = list(sign_dir.glob("*.mp4")) + list(sign_dir.glob("*.avi"))
+            # Collect video files (case-insensitive: mp4, avi, mov)
+            video_files = (list(sign_dir.glob("*.mp4")) + list(sign_dir.glob("*.MP4")) +
+                           list(sign_dir.glob("*.avi")) + list(sign_dir.glob("*.AVI")) +
+                           list(sign_dir.glob("*.mov")) + list(sign_dir.glob("*.MOV")))
             
             if len(video_files) > 0:
                 if full_label not in label_to_idx:

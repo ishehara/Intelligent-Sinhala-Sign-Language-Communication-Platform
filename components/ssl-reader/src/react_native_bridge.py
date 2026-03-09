@@ -16,8 +16,9 @@ from pathlib import Path
 import json
 from threading import Lock
 
-from preprocessing import VideoFeatureExtractor
-from models import create_model
+import tempfile
+from preprocessing_mediapipe import MediaPipeFeatureExtractor
+from models import MultiStreamFusionModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,48 +31,68 @@ model = None
 feature_extractor = None
 label_to_idx = None
 idx_to_label = None
+idx_to_sinhala = None
 model_lock = Lock()
 frame_buffer = []
 MAX_FRAMES = 60
 
 
-def load_model(model_path: str):
-    """Load the trained model."""
-    global model, feature_extractor, label_to_idx, idx_to_label
-    
+def load_model(model_path: str, label_map_path: str = None):
+    """Load the trained model and label mapping."""
+    global model, feature_extractor, label_to_idx, idx_to_label, idx_to_sinhala
+
     logger.info(f"Loading model from {model_path}")
-    
-    # Load checkpoint
-    checkpoint = torch.load(model_path, map_location='cpu')
-    label_to_idx = checkpoint.get('label_to_idx', {})
+
+    # Resolve label mapping: checkpoint doesn't embed it, so load from JSON
+    if label_map_path is None:
+        # Auto-detect: datasets/label_mapping.json relative to workspace root
+        model_dir = Path(model_path).resolve().parent
+        candidate = model_dir.parent.parent.parent / 'datasets' / 'label_mapping.json'
+        if candidate.exists():
+            label_map_path = str(candidate)
+        else:
+            raise FileNotFoundError(
+                f"label_mapping.json not found near {model_path}. "
+                "Pass --label_map explicitly."
+            )
+
+    with open(label_map_path, 'r', encoding='utf-8') as f:
+        raw = json.load(f)
+    # Support both flat {"label": idx} and nested {"label_to_idx": {"label": idx}}
+    label_to_idx = raw.get('label_to_idx', raw)
     idx_to_label = {v: k for k, v in label_to_idx.items()}
-    
-    # Initialize feature extractor
-    feature_extractor = VideoFeatureExtractor(max_frames=MAX_FRAMES)
-    input_dim = feature_extractor.get_feature_dim()
+    idx_to_sinhala = raw.get('idx_to_sinhala', {})
     num_classes = len(label_to_idx)
-    
-    # Create model
-    model_config = checkpoint.get('model_config', {
-        'model_type': 'lstm',
-        'hidden_dim': 256,
-        'num_layers': 2,
-        'dropout': 0.0
-    })
-    
-    model = create_model(
-        model_type=model_config.get('model_type', 'lstm'),
-        input_dim=input_dim,
-        num_classes=num_classes,
-        hidden_dim=model_config.get('hidden_dim', 256),
-        num_layers=model_config.get('num_layers', 2),
-        dropout=0.0
+    logger.info(f"Loaded {num_classes} labels from {label_map_path}")
+
+    # Feature extractor: 457-dim (hands 126 + face 232 + pose 99)
+    feature_extractor = MediaPipeFeatureExtractor(
+        max_frames=MAX_FRAMES,
+        use_hands=True,
+        use_pose=True,
+        use_face=True,
+        use_filtered_face=True,
+        use_blendshapes=True
     )
-    
+
+    # Model: MultiStreamFusionModel matching train_mediapipe.py defaults
+    checkpoint = torch.load(model_path, map_location='cpu')
+    model = MultiStreamFusionModel(
+        hand_dim=126,
+        face_dim=232,
+        pose_dim=99,
+        num_classes=num_classes,
+        hand_hidden=128,
+        face_hidden=256,
+        pose_hidden=128,
+        fusion_dim=512,
+        dropout=0.0,
+        use_pose=True
+    )
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    
-    logger.info(f"Model loaded: {num_classes} classes")
+
+    logger.info(f"Model loaded: {num_classes} classes, 457-dim features")
 
 
 @app.route('/health', methods=['GET'])
@@ -119,21 +140,9 @@ def predict_frame():
         
         if frame is None:
             return jsonify({'error': 'Invalid frame data'}), 400
-        
-        # Convert BGR to RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Extract features using MediaPipe
-        results = feature_extractor.holistic.process(frame_rgb)
-        landmarks = feature_extractor.extract_landmarks(results)
-        
-        # Concatenate features
-        frame_features = np.concatenate([
-            landmarks['left_hand'],
-            landmarks['right_hand'],
-            landmarks['face'],
-            landmarks['pose']
-        ])
+
+        # Extract features using the Tasks API extractor (handles BGR→RGB internally)
+        frame_features = feature_extractor.extract_frame_features(frame)
         
         # Add to buffer
         frame_buffer.append(frame_features)
@@ -148,28 +157,33 @@ def predict_frame():
             with model_lock:
                 with torch.no_grad():
                     outputs = model(features_tensor)
-                    probabilities = torch.softmax(outputs, dim=1)
+                    # MultiStreamFusionModel returns (logits, attention_weights)
+                    logits = outputs[0] if isinstance(outputs, tuple) else outputs
+                    probabilities = torch.softmax(logits, dim=1)
                     confidence, predicted_idx = torch.max(probabilities, dim=1)
-            
+
             predicted_label = idx_to_label[predicted_idx.item()]
             confidence_score = confidence.item()
-            
+            sinhala_label = idx_to_sinhala.get(str(predicted_idx.item()), predicted_label.split('/')[-1])
+
             # Get top 5 predictions
             top5_probs, top5_indices = torch.topk(probabilities, min(5, len(idx_to_label)), dim=1)
             top5_predictions = [
                 {
                     'label': idx_to_label[idx.item()],
+                    'sinhala': idx_to_sinhala.get(str(idx.item()), idx_to_label[idx.item()].split('/')[-1]),
                     'confidence': float(prob.item())
                 }
                 for prob, idx in zip(top5_probs[0], top5_indices[0])
             ]
-            
+
             # Clear buffer
             frame_buffer = []
-            
+
             return jsonify({
                 'success': True,
                 'predicted_label': predicted_label,
+                'sinhala_label': sinhala_label,
                 'confidence': float(confidence_score),
                 'top5_predictions': top5_predictions,
                 'buffer_full': True
@@ -202,14 +216,12 @@ def predict_video():
         if not video_base64:
             return jsonify({'error': 'No video provided'}), 400
         
-        # Decode video
+        # Decode video and save to a temporary file (cross-platform)
         video_bytes = base64.b64decode(video_base64)
-        
-        # Save temporarily
-        temp_path = '/tmp/temp_video.mp4'
-        with open(temp_path, 'wb') as f:
-            f.write(video_bytes)
-        
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+            tmp.write(video_bytes)
+            temp_path = tmp.name
+
         # Extract features
         features = feature_extractor.process_video(temp_path)
         
@@ -218,32 +230,36 @@ def predict_video():
         
         # Predict
         features_tensor = torch.FloatTensor(features).unsqueeze(0)
-        
+
         with model_lock:
             with torch.no_grad():
                 outputs = model(features_tensor)
-                probabilities = torch.softmax(outputs, dim=1)
+                logits = outputs[0] if isinstance(outputs, tuple) else outputs
+                probabilities = torch.softmax(logits, dim=1)
                 confidence, predicted_idx = torch.max(probabilities, dim=1)
         
         predicted_label = idx_to_label[predicted_idx.item()]
         confidence_score = confidence.item()
-        
+        sinhala_label = idx_to_sinhala.get(str(predicted_idx.item()), predicted_label.split('/')[-1])
+
         # Get top 5
         top5_probs, top5_indices = torch.topk(probabilities, min(5, len(idx_to_label)), dim=1)
         top5_predictions = [
             {
                 'label': idx_to_label[idx.item()],
+                'sinhala': idx_to_sinhala.get(str(idx.item()), idx_to_label[idx.item()].split('/')[-1]),
                 'confidence': float(prob.item())
             }
             for prob, idx in zip(top5_probs[0], top5_indices[0])
         ]
-        
+
         # Clean up
         Path(temp_path).unlink(missing_ok=True)
-        
+
         return jsonify({
             'success': True,
             'predicted_label': predicted_label,
+            'sinhala_label': sinhala_label,
             'confidence': float(confidence_score),
             'top5_predictions': top5_predictions
         })
@@ -266,7 +282,9 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='React Native Bridge API Server')
     parser.add_argument('--model_path', type=str, required=True,
-                       help='Path to trained model')
+                       help='Path to trained model checkpoint (.pth)')
+    parser.add_argument('--label_map', type=str, default=None,
+                       help='Path to label_mapping.json (auto-detected if omitted)')
     parser.add_argument('--host', type=str, default='0.0.0.0',
                        help='Host to bind to')
     parser.add_argument('--port', type=int, default=5000,
@@ -275,7 +293,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Load model
-    load_model(args.model_path)
+    load_model(args.model_path, args.label_map)
     
     # Start server
     logger.info(f"Starting API server on {args.host}:{args.port}")

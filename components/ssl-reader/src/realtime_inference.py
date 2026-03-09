@@ -1,6 +1,6 @@
 """
-Real-time Sign Language Recognition with Emotion Detection.
-Uses webcam to capture signs and display predictions with emotional context.
+Real-time Sign Language Recognition — MultiStreamFusionModel (457-dim).
+Uses webcam to capture signs and display Sinhala + English predictions.
 
 Developer: IT22304674 – Liyanage M.L.I.S.
 """
@@ -15,16 +15,27 @@ from collections import deque
 import logging
 import time
 
+from PIL import Image, ImageDraw, ImageFont
 from preprocessing_mediapipe import MediaPipeFeatureExtractor
-from models import MultimodalLSTMModel
+from models import MultiStreamFusionModel
+
+# ── Sinhala-capable font (Nirmala UI ships with Windows 10/11) ────────────────
+_SINHALA_FONT_PATH = "C:/Windows/Fonts/Nirmala.ttc"
+try:
+    _FONT_LG = ImageFont.truetype(_SINHALA_FONT_PATH, 42)   # Sinhala label
+    _FONT_MD = ImageFont.truetype(_SINHALA_FONT_PATH, 26)   # English / confidence
+    _FONT_SM = ImageFont.truetype(_SINHALA_FONT_PATH, 20)   # Top-3 list
+    _FONT_XS = ImageFont.truetype(_SINHALA_FONT_PATH, 16)   # Status bar
+except OSError:
+    _FONT_LG = _FONT_MD = _FONT_SM = _FONT_XS = ImageFont.load_default()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class RealtimeSignLanguageDetector:
-    """Real-time sign language detection with emotion recognition."""
-    
+    """Real-time sign language detection using MultiStreamFusionModel (457-dim)."""
+
     def __init__(
         self,
         model_path: str,
@@ -34,286 +45,279 @@ class RealtimeSignLanguageDetector:
         confidence_threshold: float = 0.3,
         buffer_size: int = 60
     ):
-        """
-        Initialize the real-time detector.
-        
-        Args:
-            model_path: Path to trained model checkpoint (.pth)
-            label_map_path: Path to label mapping JSON file
-            device: Device to run inference on ('cuda' or 'cpu')
-            max_frames: Maximum frames to buffer
-            confidence_threshold: Minimum confidence for predictions
-            buffer_size: Number of frames to buffer before prediction
-        """
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.max_frames = max_frames
         self.confidence_threshold = confidence_threshold
         self.buffer_size = buffer_size
-        
-        # Initialize MediaPipe feature extractor
-        logger.info("Initializing MediaPipe...")
+
+        # ── Feature extractor: must match training (457-dim) ──────────────
+        logger.info("Initializing MediaPipe (457-dim: hands + filtered face + blendshapes + pose)...")
         self.feature_extractor = MediaPipeFeatureExtractor(
             max_frames=max_frames,
             use_hands=True,
             use_face=True,
-            use_pose=False
+            use_filtered_face=True,
+            use_blendshapes=True,
+            use_pose=True
         )
-        
-        feature_dim = self.feature_extractor.get_feature_dim()
-        logger.info(f"Feature dimension: {feature_dim}")
-        
-        # Load label mapping
-        if label_map_path and Path(label_map_path).exists():
-            with open(label_map_path, 'r') as f:
-                label_data = json.load(f)
-                # Handle nested structure {"label_to_idx": {...}}
-                if isinstance(label_data, dict) and 'label_to_idx' in label_data:
-                    self.label_to_idx = label_data['label_to_idx']
-                else:
-                    self.label_to_idx = label_data
-        else:
-            # Try to load from checkpoint
-            checkpoint = torch.load(model_path, map_location=self.device)
-            label_data = checkpoint.get('label_to_idx', {})
-            # Handle nested structure
-            if isinstance(label_data, dict) and 'label_to_idx' in label_data:
-                self.label_to_idx = label_data['label_to_idx']
-            else:
-                self.label_to_idx = label_data
-        
-        self.idx_to_label = {v: k for k, v in self.label_to_idx.items()}
-        num_classes = len(self.label_to_idx)
-        
-        logger.info(f"Number of sign classes: {num_classes}")
-        
-        # Load model
-        logger.info(f"Loading model from {model_path}")
+        logger.info(f"Feature dimension: {self.feature_extractor.get_feature_dim()}")
+
+        # ── Label mapping ─────────────────────────────────────────────────
         checkpoint = torch.load(model_path, map_location=self.device)
-        
-        # Get model config from checkpoint or use defaults
-        hidden_dim = checkpoint.get('hidden_dim', 512)
-        num_layers = checkpoint.get('num_layers', 3)
-        
-        self.model = MultimodalLSTMModel(
-            input_dim=feature_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
+
+        if label_map_path and Path(label_map_path).exists():
+            with open(label_map_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+        else:
+            raw = checkpoint.get('label_to_idx', {})
+
+        self.label_to_idx = raw.get('label_to_idx', raw) if isinstance(raw, dict) else raw
+        self.idx_to_label = {v: k for k, v in self.label_to_idx.items()}
+        # Sinhala translations (idx string → sinhala string)
+        self.idx_to_sinhala = raw.get('idx_to_sinhala', {}) if isinstance(raw, dict) else {}
+        num_classes = len(self.label_to_idx)
+        logger.info(f"Classes: {num_classes}  |  Sinhala translations: {len(self.idx_to_sinhala)}")
+
+        # ── Build MultiStreamFusionModel matching training config ─────────
+        logger.info(f"Loading MultiStreamFusionModel from {model_path}")
+        self.model = MultiStreamFusionModel(
+            hand_dim=126,
+            face_dim=232,   # 60 filtered landmarks × 3 + 52 blendshapes
+            pose_dim=99,    # 33 landmarks × 3
             num_classes=num_classes,
-            bidirectional=True
+            hand_hidden=128,
+            face_hidden=256,
+            pose_hidden=128,
+            fusion_dim=512,
+            dropout=0.0,    # no dropout at inference time
+            use_pose=True
         )
-        
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model.to(self.device)
         self.model.eval()
-        
-        logger.info(f"Model loaded successfully on {self.device}")
-        
-        # Frame buffer for temporal sequences
+        logger.info(f"Model ready on {self.device}")
+
+        # Frame buffer
         self.frame_buffer = deque(maxlen=buffer_size)
-        
-        # Emotion labels (based on facial blendshapes)
-        self.emotion_labels = ['Neutral', 'Happy', 'Sad', 'Angry', 'Surprised', 'Fear']
-    
-    def extract_emotion_from_blendshapes(self, features):
-        """Extract dominant emotion from facial blendshapes."""
-        # Blendshapes are the last 52 features
-        blendshapes = features[-52:]
-        
-        # Simple heuristic based on key blendshapes
-        # These indices are approximate - adjust based on MediaPipe's blendshape order
-        smile_score = blendshapes[0:10].mean() if len(blendshapes) > 10 else 0
-        frown_score = blendshapes[10:20].mean() if len(blendshapes) > 20 else 0
-        
-        if smile_score > 0.3:
-            return 'Happy'
-        elif frown_score > 0.3:
-            return 'Sad'
-        else:
-            return 'Neutral'
+
+        # Feature split dims (must match training config)
+        self.hand_dim = 126
+        self.face_dim = 232   # 60 landmarks×3 + 52 blendshapes
+        self.pose_dim = 99    # 33 landmarks×3
+
+    def _apply_root_relative_norm(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        Mirror of dataset._apply_root_relative_norm — MUST match exactly.
+        Operates on (frames, 457) tensor in-place on a clone.
+        """
+        features = features.clone()
+        frames = features.shape[0]
+
+        # Hands: wrist-relative (landmark 0 of each hand)
+        hands = features[:, :126].view(frames, 2, 21, 3)
+        wrist = hands[:, :, 0:1, :]
+        detected = (wrist.abs().sum(dim=-1, keepdim=True) > 1e-6)
+        hands = hands - wrist * detected.float()
+        features[:, :126] = hands.view(frames, 126)
+
+        # Face: nose-relative (index 36 of 60 key landmarks)
+        face_start = 126
+        face_lm = features[:, face_start:face_start + 180].view(frames, 60, 3)
+        nose = face_lm[:, 36:37, :]
+        detected = (nose.abs().sum(dim=-1, keepdim=True) > 1e-6)
+        face_lm = face_lm - nose * detected.float()
+        features[:, face_start:face_start + 180] = face_lm.view(frames, 180)
+        # Blendshapes (dims 306:358) are left unchanged
+
+        # Pose: mid-shoulder-relative (landmarks 11 + 12)
+        pose_start = 126 + 232   # = 358
+        pose = features[:, pose_start:pose_start + 99].view(frames, 33, 3)
+        mid_shoulder = (pose[:, 11:12, :] + pose[:, 12:13, :]) / 2.0
+        detected = (mid_shoulder.abs().sum(dim=-1, keepdim=True) > 1e-6)
+        pose = pose - mid_shoulder * detected.float()
+        features[:, pose_start:pose_start + 99] = pose.view(frames, 99)
+
+        return features
     
     def predict_from_buffer(self):
-        """Make prediction from buffered frames."""
-        if len(self.frame_buffer) < 10:  # Need minimum frames
-            return None, 0.0, 'Neutral'
-        
-        # Stack frames into sequence
+        """Make prediction from buffered frames. Returns (label, sinhala, confidence, top3)."""
+        if len(self.frame_buffer) < 10:
+            return None, None, 0.0, []
+
         frames = list(self.frame_buffer)
-        
+
         # Pad or truncate to max_frames
         if len(frames) < self.max_frames:
-            # Pad with zeros
             padding = [np.zeros_like(frames[0])] * (self.max_frames - len(frames))
             frames = frames + padding
         else:
             frames = frames[:self.max_frames]
-        
-        # Convert to tensor
+
         features = torch.FloatTensor(np.array(frames)).unsqueeze(0).to(self.device)
-        
-        # Predict
+
+        # Apply root-relative normalization — MUST match dataset.py preprocessing
+        features = self._apply_root_relative_norm(features.squeeze(0)).unsqueeze(0)
+
         with torch.no_grad():
             outputs = self.model(features)
-            probabilities = torch.softmax(outputs, dim=1)
+            # MultiStreamFusionModel returns (logits, attention_weights)
+            logits = outputs[0] if isinstance(outputs, tuple) else outputs
+            probabilities = torch.softmax(logits, dim=1)
             confidence, predicted_idx = probabilities.max(1)
-            
-            predicted_label = self.idx_to_label.get(predicted_idx.item(), 'Unknown')
-            confidence_score = confidence.item()
-            
-            # Extract emotion from last frame's facial features
-            last_frame = frames[-1]
-            emotion = self.extract_emotion_from_blendshapes(last_frame)
-        
-        return predicted_label, confidence_score, emotion
+
+        idx = predicted_idx.item()
+        predicted_label = self.idx_to_label.get(idx, 'Unknown')
+        sinhala_label = self.idx_to_sinhala.get(str(idx), predicted_label.split('/')[-1])
+        confidence_score = confidence.item()
+
+        # Top-3
+        top3_probs, top3_idxs = torch.topk(probabilities, min(3, probabilities.shape[1]), dim=1)
+        top3 = [
+            (self.idx_to_label.get(i.item(), '?'),
+             self.idx_to_sinhala.get(str(i.item()), self.idx_to_label.get(i.item(), '?').split('/')[-1]),
+             float(p.item()))
+            for p, i in zip(top3_probs[0], top3_idxs[0])
+        ]
+
+        return predicted_label, sinhala_label, confidence_score, top3
     
-    def draw_results(self, frame, prediction, confidence, emotion, fps):
-        """Draw prediction results on frame."""
+    def draw_results(self, frame, label, sinhala, confidence, top3, fps):
+        """Draw prediction results using PIL so Sinhala Unicode renders correctly."""
         h, w = frame.shape[:2]
-        
-        # Create overlay
-        overlay = frame.copy()
-        
-        # Draw semi-transparent background for text
-        cv2.rectangle(overlay, (10, 10), (w - 10, 150), (0, 0, 0), -1)
-        frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
-        
-        # Draw prediction
-        if prediction and confidence > self.confidence_threshold:
-            text = f"Sign: {prediction}"
-            conf_text = f"Confidence: {confidence:.2%}"
-            color = (0, 255, 0) if confidence > 0.7 else (0, 255, 255)
+
+        # Convert BGR (OpenCV) → RGB (PIL)
+        pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(pil_img, "RGBA")
+
+        # Semi-transparent dark background panel
+        draw.rectangle([(10, 10), (w - 10, 210)], fill=(0, 0, 0, 140))
+
+        if label and confidence > self.confidence_threshold:
+            color = (0, 255, 80) if confidence > 0.7 else (0, 220, 220)
+            # Sinhala label — large
+            draw.text((20, 18), sinhala or label, font=_FONT_LG, fill=color)
+            # English label
+            draw.text((20, 68), label, font=_FONT_MD, fill=color)
+            # Confidence bar
+            bar_total = w - 40
+            bar_fill = int(bar_total * confidence)
+            draw.rectangle([(20, 100), (w - 20, 114)], fill=(60, 60, 60, 200))
+            draw.rectangle([(20, 100), (20 + bar_fill, 114)], fill=(*color, 220))
+            draw.text((20, 118), f"{confidence:.1%}", font=_FONT_SM, fill=color)
         else:
-            text = "No sign detected"
-            conf_text = "Show a sign..."
-            color = (128, 128, 128)
-        
-        cv2.putText(frame, text, (20, 40), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-        cv2.putText(frame, conf_text, (20, 70),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        
-        # Draw emotion
-        emotion_text = f"Emotion: {emotion}"
-        emotion_color = (255, 200, 0)
-        cv2.putText(frame, emotion_text, (20, 100),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, emotion_color, 2)
-        
-        # Draw FPS
-        fps_text = f"FPS: {fps:.1f}"
-        cv2.putText(frame, fps_text, (20, 130),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # Draw instructions
-        cv2.putText(frame, "Press 'q' to quit, 'c' to clear buffer", 
-                   (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-        
-        return frame
+            draw.text((20, 30), "Performing sign...", font=_FONT_MD, fill=(160, 160, 160))
+
+        # Top-3 predictions
+        draw.text((20, 148), "Top predictions:", font=_FONT_XS, fill=(200, 200, 200))
+        y = 166
+        for i, (eng, sin, prob) in enumerate(top3):
+            txt = f"  {i+1}. {sin}  {prob:.1%}"
+            clr = (160, 255, 160) if i == 0 else (150, 150, 150)
+            draw.text((20, y), txt, font=_FONT_XS, fill=clr)
+            y += 18
+
+        # Buffer bar + FPS at bottom
+        draw.rectangle([(10, h - 28), (w - 10, h - 10)], fill=(0, 0, 0, 120))
+        buf_w = int((w - 40) * min(len(self.frame_buffer) / 30, 1.0))
+        draw.rectangle([(20, h - 24), (w - 20, h - 14)], fill=(40, 40, 40, 200))
+        draw.rectangle([(20, h - 24), (20 + buf_w, h - 14)], fill=(0, 150, 255, 220))
+        draw.text((20, h - 34), f"Buffer {len(self.frame_buffer)}/30  FPS {fps:.1f}  [q]uit  [c]lear",
+                  font=_FONT_XS, fill=(200, 200, 200))
+
+        # Convert back to BGR (OpenCV)
+        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     
-    def run_webcam(self, camera_id: int = 0, show_landmarks: bool = True):
-        """
-        Run real-time detection from webcam.
-        
-        Args:
-            camera_id: Webcam device ID
-            show_landmarks: Whether to draw hand/face landmarks
-        """
+    def run_webcam(self, camera_id: int = 0):
+        """Run real-time detection from webcam."""
         logger.info(f"Starting webcam {camera_id}...")
         cap = cv2.VideoCapture(camera_id)
-        
+
         if not cap.isOpened():
             logger.error(f"Failed to open camera {camera_id}")
             return
-        
-        # Set camera properties
+
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         cap.set(cv2.CAP_PROP_FPS, 30)
-        
-        logger.info("Webcam opened successfully")
-        logger.info("Press 'q' to quit, 'c' to clear buffer")
-        
-        prediction = None
-        confidence = 0.0
-        emotion = 'Neutral'
-        fps = 0
-        
-        # FPS calculation
+
+        logger.info("Webcam ready. Press 'q' to quit, 'c' to clear buffer.")
+
+        label, sinhala, confidence, top3 = None, None, 0.0, []
+        fps = 0.0
         prev_time = time.time()
         frame_count = 0
-        
+
         try:
             while True:
                 ret, frame = cap.read()
-                
                 if not ret:
                     logger.error("Failed to read frame")
                     break
-                
-                # Flip frame for mirror effect
+
+                # Mirror effect
                 frame = cv2.flip(frame, 1)
-                
-                # Extract features from current frame
-                features = self.feature_extractor.extract_frame_features(frame)
-                
+
+                # Extract 457-dim features from this frame
+                try:
+                    features = self.feature_extractor.extract_frame_features(frame)
+                except Exception:
+                    features = None
+
                 if features is not None and not np.all(features == 0):
-                    # Add to buffer
                     self.frame_buffer.append(features)
-                    
-                    # Make prediction every few frames
+
+                    # Predict every 10 frames once buffer has ≥30 frames
                     if len(self.frame_buffer) >= 30 and frame_count % 10 == 0:
-                        prediction, confidence, emotion = self.predict_from_buffer()
-                
-                # Calculate FPS
+                        label, sinhala, confidence, top3 = self.predict_from_buffer()
+
+                # FPS
                 frame_count += 1
                 if frame_count % 10 == 0:
                     curr_time = time.time()
-                    fps = 10 / (curr_time - prev_time)
+                    fps = 10 / (curr_time - prev_time + 1e-9)
                     prev_time = curr_time
-                
-                # Draw results
-                display_frame = self.draw_results(frame, prediction, confidence, emotion, fps)
-                
-                # Show frame
-                cv2.imshow('Sign Language Detection with Emotion Recognition', display_frame)
-                
-                # Handle key presses
+
+                display = self.draw_results(frame, label, sinhala, confidence, top3, fps)
+                cv2.imshow('Sinhala Sign Language Detection', display)
+
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     break
                 elif key == ord('c'):
                     self.frame_buffer.clear()
-                    prediction = None
-                    confidence = 0.0
-                    emotion = 'Neutral'
+                    label, sinhala, confidence, top3 = None, None, 0.0, []
                     logger.info("Buffer cleared")
-        
+
+        except KeyboardInterrupt:
+            logger.info("Stopped by user (Ctrl+C)")
         finally:
-            cap.release()
-            cv2.destroyAllWindows()
+            try:
+                cap.release()
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
             logger.info("Webcam stopped")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Real-time Sign Language Detection with Emotion Recognition'
+        description='Real-time Sinhala Sign Language Detection'
     )
-    
     parser.add_argument('--model_path', type=str, required=True,
-                       help='Path to trained model checkpoint (.pth)')
+                        help='Path to trained checkpoint (.pth)')
     parser.add_argument('--label_map', type=str, default=None,
-                       help='Path to label mapping JSON file')
+                        help='Path to label_mapping.json (auto-detected if omitted)')
     parser.add_argument('--camera_id', type=int, default=0,
-                       help='Camera device ID (default: 0)')
+                        help='Camera device ID (default: 0)')
     parser.add_argument('--device', type=str, default='cuda',
-                       choices=['cuda', 'cpu'],
-                       help='Device to run inference on')
+                        choices=['cuda', 'cpu'])
     parser.add_argument('--confidence', type=float, default=0.3,
-                       help='Minimum confidence threshold (default: 0.3)')
+                        help='Minimum confidence threshold (default: 0.3)')
     parser.add_argument('--buffer_size', type=int, default=60,
-                       help='Frame buffer size (default: 60)')
-    
+                        help='Frame buffer size (default: 60)')
+
     args = parser.parse_args()
-    
-    # Initialize detector
+
     detector = RealtimeSignLanguageDetector(
         model_path=args.model_path,
         label_map_path=args.label_map,
@@ -321,8 +325,7 @@ def main():
         confidence_threshold=args.confidence,
         buffer_size=args.buffer_size
     )
-    
-    # Run webcam detection
+
     detector.run_webcam(camera_id=args.camera_id)
 
 

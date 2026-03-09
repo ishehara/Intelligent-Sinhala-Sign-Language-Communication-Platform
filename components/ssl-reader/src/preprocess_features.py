@@ -14,7 +14,7 @@ from tqdm import tqdm
 sys.path.append(str(Path(__file__).parent))
 
 from preprocessing_mediapipe import MediaPipeFeatureExtractor, create_dataset_splits
-from dataset import SignLanguageDataset
+from dataset import SinhalaSignLanguageDataset as SignLanguageDataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 def main():
     # Configuration (match your training settings)
     dataset_root = r"G:\research\Intelligent-Sinhala-Sign-Language-Communication-Platform\datasets\signVideo"
-    cache_dir = "data/processed/mediapipe_normalized"
+    cache_dir = "data/processed/mediapipe_features_457"
     max_frames = 60
     
     logger.info("=" * 80)
@@ -31,7 +31,7 @@ def main():
     logger.info("=" * 80)
     logger.info(f"Dataset: {dataset_root}")
     logger.info(f"Cache: {cache_dir}")
-    logger.info(f"Features: 457 dims (Hands 126 + Face 232 + Pose 99)")
+    logger.info(f"Features: 457 dims (Hands 126 + Face 180 + Blendshapes 52 + Pose 99)")
     logger.info("=" * 80)
     
     # Initialize feature extractor
@@ -39,9 +39,10 @@ def main():
     feature_extractor = MediaPipeFeatureExtractor(
         max_frames=max_frames,
         use_hands=True,
-        use_pose=True,  # Balanced features
+        use_pose=True,
         use_face=True,
-        use_filtered_face=True  # 60 key landmarks instead of 468
+        use_filtered_face=True,  # 60 key landmarks instead of 468
+        use_blendshapes=True     # +52 blendshape dims → 457 total
     )
     
     logger.info(f"Feature dimension: {feature_extractor.get_feature_dim()}")
@@ -60,11 +61,12 @@ def main():
         # Create dataset (no augmentation for caching)
         dataset = SignLanguageDataset(
             samples=samples,
-            label_map=label_map,
+            label_to_idx=label_map,
             feature_extractor=feature_extractor,
-            augmenter=None,  # No augmentation during pre-extraction
             cache_dir=cache_dir,
-            use_cache=True
+            use_cache=True,
+            training=False,
+            augment=False
         )
         
         # Extract all features with progress bar
