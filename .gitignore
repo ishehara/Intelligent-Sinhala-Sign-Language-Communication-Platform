@@ -54,3 +54,6 @@ android/.gradle/
 # Jupyter notebooks
 .ipynb_checkpoints/
 EOF
+components/ssl-reader/processed.zip
+components/ssl-reader/colab_train.ipynb
+components/ssl-reader/ssl_src.zip
