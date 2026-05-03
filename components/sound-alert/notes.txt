@@ -1,0 +1,67 @@
+================================================================
+STARTUP 
+================================================================
+
+----------------------------------------------------------------
+STEP 1 — CHECK YOUR IP (run this first, hotspot may change)
+----------------------------------------------------------------
+Open any terminal and run:
+
+    ipconfig
+
+Find "Wi-Fi IPv4 Address".
+If it is NOT 10.80.129.107, update this file:
+    services\soundAlertService.ts  (line 30)
+Change:  export const API_BASE_URL = "http://10.80.129.107:5003";
+To:      export const API_BASE_URL = "http://YOUR_NEW_IP:5003";
+
+
+----------------------------------------------------------------
+STEP 2 — START THE BACKEND (CMD commands, run one by one)
+----------------------------------------------------------------
+Open a NEW CMD window (NOT PowerShell) and run:
+
+    cd C:\Users\ASUS\Desktop\Research\Intelligent-Sinhala-Sign-Language-Communication-Platform
+
+    .venv\Scripts\activate.bat
+
+    cd components\sound-alert
+
+    python src\api_server.py
+
+You should see:
+    * Running on http://10.80.129.107:5003
+    [INFO] Model ready.
+
+NOTE: If "python" is not recognized after activate.bat, use full path:
+    C:\Users\ASUS\Desktop\Research\Intelligent-Sinhala-Sign-Language-Communication-Platform\.venv\Scripts\python src\api_server.py
+
+
+----------------------------------------------------------------
+STEP 3 — START THE FRONTEND (open a SECOND terminal)
+----------------------------------------------------------------
+
+    cd C:\Users\ASUS\Desktop\Research\Intelligent-Sinhala-Sign-Language-Platform-Frontend
+
+    npx expo start
+
+Scan the QR code with Expo Go app on your phone.
+
+
+----------------------------------------------------------------
+IMPORTANT REMINDERS
+----------------------------------------------------------------
+- Start BACKEND first, then FRONTEND
+- Phone must be on the SAME hotspot as the laptop
+- Install "Expo Go" on phone from Google Play Store (if not done)
+- If app freezes or errors: press R in the Expo terminal to reload
+
+
+================================================================
+  ORDER SUMMARY
+================================================================
+  1. ipconfig  →  check IP
+  2. Start backend  →  python src/api_server.py
+  3. Start frontend  →  npx expo start
+  4. Open Expo Go on phone  →  scan QR code
+================================================================

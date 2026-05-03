@@ -3,6 +3,11 @@ Process Multiple Sound Datasets for Combined Training
 Processes horns and sirens datasets into 9 individual classes:
   Horns (5):  bus horns, car horns, motorcycle horns, train horns, truck horns
   Sirens (4): ambulance, firetruck, police, traffic
+ 
+Sometimes we don't have enough audio files for the computer to learn properly. 
+This script takes the existing sounds and creates new, fake variations of them 
+(by adding background noise, making them faster, or changing the pitch). 
+This gives the computer a much larger dataset to practice with.
 """
 
 import os
@@ -27,6 +32,7 @@ except ImportError:
 AUG_TARGET = 400  # minimum samples per class after augmentation
 AUG_MAX_MULTIPLIER = 3  # never augment a class by more than 3x its real sample count
 
+"""Mapping of dataset folder names to canonical class names."""
 # Maps folder name (lowercase) → canonical class name
 CATEGORY_MAP = {
     # Horns
@@ -51,6 +57,7 @@ CLASS_NAMES = ['bus horns', 'car horns', 'train horns', 'truck horns',
                'ambulance', 'firetruck', 'police', 'traffic']
 CLASS_TO_LABEL = {name: idx for idx, name in enumerate(CLASS_NAMES)}
 
+"""Augment features by applying random transformations to the raw audio."""
 
 def augment_features(features, n_mfcc, n_frames, target_count, preprocessor, raw_audios, sr):
     """

@@ -1,6 +1,11 @@
 """
 Audio Preprocessing Module for Sound Detection Component
 Loads audio files, extracts MFCC features, and prepares data for training.
+
+It does 3 main things:
+     1. Loads the audio and cuts it to exactly 2.5 seconds.
+     2. Converts the sound waves into mathematical numbers (called MFCCs) because computers only understand numbers.
+     3. Splits these numbers into two groups ("Training data" to teach the model, and "Testing data" for the exam) and saves them as .npy files.
 """
 
 import os
@@ -34,6 +39,7 @@ class AudioPreprocessor:
         self.label_encoder = {}
         self.label_decoder = {}
         
+        """Initialize the preprocessor with specified parameters."""
     def load_audio_file(self, file_path: str) -> np.ndarray:
         """
         Load an audio file and return the waveform.
@@ -53,6 +59,7 @@ class AudioPreprocessor:
             print(f"Error loading {file_path}: {e}")
             return None
     
+    """Extract MFCC features from the audio waveform."""
     def extract_mfcc(self, audio: np.ndarray) -> np.ndarray:
         """
         Extract MFCC features from audio waveform.
@@ -92,6 +99,7 @@ class AudioPreprocessor:
             print(f"Error extracting MFCC: {e}")
             return None
     
+    """Load audio files from categorized folders, extract features, and create label mappings."""
     def load_dataset_from_folders(self, root_dir: str, 
                                   audio_extensions: List[str] = ['.wav', '.mp3', '.flac']) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -167,6 +175,8 @@ class AudioPreprocessor:
         print(f"Categories: {label_names}")
         
         return features, labels
+    
+    """Split dataset into training and testing sets with stratification."""
     
     def split_dataset(self, features: np.ndarray, labels: np.ndarray, 
                      test_size: float = 0.2, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

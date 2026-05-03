@@ -1,6 +1,11 @@
 """
 Real-Time Sound Detection using Microphone
 Captures audio from microphone and detects sound category in real-time.
+
+This is the main application. It turns on the device's microphone and listens 
+to the real world. Whenever it hears a sound, it quickly converts it into numbers, 
+asks the trained brain (model) what it is, and instantly displays the result 
+(e.g., "Ambulance Detected") on the screen.
 """
 
 import numpy as np
