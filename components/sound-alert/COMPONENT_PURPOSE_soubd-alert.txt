@@ -1,0 +1,176 @@
+Sound Alert Component - Purpose & Functionality
+================================================================
+Project: Intelligent Sinhala Sign Language Communication Platform
+Component: Sound Alert
+================================================================
+
+
+WHAT IS THIS COMPONENT?
+---------------------------------------------------------------
+The Sound Alert component is a background listening system designed
+specifically for deaf and hearing-impaired users. It runs on the
+user's mobile phone and continuously listens to the surrounding
+environment through the phone microphone every 2.5 seconds.
+
+When it detects a dangerous or important sound nearby, it immediately
+alerts the user through the phone screen so they are aware of what
+is happening around them — even if they cannot hear it.
+
+
+WHAT PROBLEM DOES IT SOLVE?
+---------------------------------------------------------------
+Deaf and hearing-impaired people cannot hear vehicles honking at
+them or emergency sirens approaching. This puts them at serious
+risk in everyday situations such as:
+
+  - Walking on the road when a car is honking to warn them
+  - Not realizing an ambulance or fire truck is approaching
+  - Being unaware of a police siren nearby
+  - Missing warning sounds from trucks, buses, or trains
+
+This component solves that problem by acting as the "ears" of
+the application and alerting the user through visual notifications
+on their phone screen.
+
+
+WHAT SOUNDS DOES IT DETECT?
+---------------------------------------------------------------
+The system is trained to recognize the following sounds:
+
+  Horns (vehicle warning sounds):
+    - Car horn        🚗
+    - Bus horn        🚌
+    - Truck horn      🚛
+    - Train horn      🚂
+
+  Sirens (emergency vehicle sounds):
+    - Ambulance siren 🚑
+    - Fire truck siren 🚒
+    - Police siren    🚓
+
+  Note: Each of these produces its own specific alert on screen
+  with a matching icon so the user knows exactly what was heard.
+
+
+HOW DOES IT WORK IN REAL LIFE?
+---------------------------------------------------------------
+  1. The user opens the Sound Alert screen in the app and taps
+     the Start Monitoring button.
+  2. The phone microphone begins listening to the surroundings
+     automatically every 2.5 seconds.
+  3. When a horn or siren is detected with enough confidence,
+     the app immediately shows a visual alert on screen.
+  4. The user sees the alert and becomes aware of the danger.
+  5. All detections are saved to an Alert History so the user
+     can review what sounds were detected throughout the day.
+
+Example real-life scenario:
+  - A deaf person is walking near a road.
+  - An ambulance is approaching from behind with its siren on.
+  - The app detects the siren through the phone microphone.
+  - The entire phone screen turns red and shows:
+       🚑  "Ambulance Detected"
+       HIGH PRIORITY
+  - The phone vibrates continuously until the user taps DISMISS.
+  - The user sees it, steps aside, and stays safe.
+
+
+NOTIFICATION PRIORITY (FRONTEND)
+---------------------------------------------------------------
+Not all sounds are equally dangerous. The app uses three levels
+of urgency, shown differently on screen:
+
+  TIER 1 — EMERGENCY (Full-Screen Red Alert, must be dismissed manually):
+    Triggered by the most dangerous sounds:
+      - Ambulance siren  🚑
+      - Fire truck siren 🚒
+      - Police siren     🚓
+      - Train horn       🚂  (large vehicle, high danger)
+      - Truck horn       🚛  (large vehicle, high danger)
+      - Bus horn         🚌  (large vehicle, high danger)
+
+    What happens on screen:
+      - The entire screen turns red
+      - A large emoji and sound name appear in the centre
+      - The phone vibrates continuously in a strong pattern
+      - The screen flashes
+      - The user must tap DISMISS to clear it
+
+  TIER 2 — WARNING (Auto-dismiss banner, disappears after 3.5 seconds):
+    Triggered by less urgent sounds:
+      - Car horn   🚗
+      - Motorcycle horn 🏍️
+
+    What happens on screen:
+      - A banner slides down from the top of the screen
+      - Shows the sound name and a light vibration
+      - Disappears automatically after a few seconds
+
+  NO VISUAL ALERT (Silent / Ambient):
+    - Background traffic noise is logged silently in history
+      but does not show any banner or interrupt the user,
+      because it is too frequent and not immediately dangerous.
+
+  Priority rule:
+    - If an emergency sound and a warning arrive at the same time,
+      the emergency (Tier 1) alert always takes priority and
+      appears on top, covering the banner completely.
+
+  User settings:
+    - The user can turn individual sound types on or off from
+      the Settings screen inside the app.
+    - Emergency sirens (ambulance, fire truck, police) are always
+      active and cannot be turned off, for the user's safety.
+
+
+SCREENS IN THE APP
+---------------------------------------------------------------
+  Home (Sound Monitoring):
+    - Start / Stop monitoring button
+    - Live list of recent alerts with time, type, and severity
+    - Filter alerts by severity (All / High / Medium / Low)
+    - Backend connection status indicator
+
+  Alert History:
+    - Full history of all detections grouped by Today /
+      Yesterday / This Week
+    - Filter by sound type or severity
+    - Useful for reviewing what happened throughout the day
+
+  Settings:
+    - Toggle individual horn types on or off
+    - Toggle vibration, screen flash, and banner notifications
+    - Emergency sirens are always on (cannot be disabled)
+
+
+WHO IS IT FOR?
+---------------------------------------------------------------
+  - Deaf and hearing-impaired individuals in Sri Lanka
+  - People who use the Intelligent Sinhala Sign Language app
+  - Anyone who needs sound-awareness assistance in daily life
+
+
+WHAT DOES THE USER EXPERIENCE?
+---------------------------------------------------------------
+From the user's point of view, the experience is simple:
+
+  - Open the app and press Start Monitoring
+  - Go about your day normally
+  - The screen reacts immediately when a dangerous sound is heard
+  - Red full-screen flash = emergency nearby (ambulance / police / fire)
+  - Top banner = vehicle horn nearby (car / motorcycle)
+  - Check Alert History at any time to see past detections
+
+The user does not need to understand anything about how it works.
+The component does all the detection automatically and silently.
+
+
+OVERALL PURPOSE
+---------------------------------------------------------------
+The Sound Alert component gives hearing-impaired users the ability
+to be aware of dangerous sounds in their environment in real time.
+It acts as a safety layer that uses the phone's microphone and
+artificial intelligence to recognize threatening sounds and
+immediately notify the user through clear visual alerts — helping
+them stay safe in everyday situations that hearing people handle
+automatically through sound.

@@ -244,10 +244,17 @@ def create_dataset_splits(
             sign_name = sign_dir.name
             full_label = f"{category_name}/{sign_name}"
             
+<<<<<<< Updated upstream
             # Collect video files (case-insensitive: mp4, avi, mov)
             video_files = (list(sign_dir.glob("*.mp4")) + list(sign_dir.glob("*.MP4")) +
                            list(sign_dir.glob("*.avi")) + list(sign_dir.glob("*.AVI")) +
                            list(sign_dir.glob("*.mov")) + list(sign_dir.glob("*.MOV")))
+=======
+            # Collect video files (include .mov files which are part of the full dataset)
+            video_files = (list(sign_dir.glob("*.mp4")) +
+                           list(sign_dir.glob("*.mov")) +
+                           list(sign_dir.glob("*.avi")))
+>>>>>>> Stashed changes
             
             if len(video_files) > 0:
                 if full_label not in label_to_idx:
@@ -269,9 +276,9 @@ def create_dataset_splits(
         rng = np.random.default_rng(seed=42)
         rng.shuffle(video_paths)
         
-        # Guarantee at least 2 val samples and 2 test samples per class.
-        # int(11 * 0.15) = 1 — only 1 val sample/class makes early stopping unreliable.
-        n_val = max(2, int(n_videos * val_ratio))
+        # Use 1 val + 1 test minimum per class so training gets as much data as possible.
+        # For very small classes (median 7 videos) max(2,...) was leaving only 3 for training.
+        n_val = max(1, int(n_videos * val_ratio))
         n_train = max(1, n_videos - n_val * 2)  # symmetric: equal val and test size
         
         # Split

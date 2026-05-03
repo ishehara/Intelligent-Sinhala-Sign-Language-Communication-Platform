@@ -5,9 +5,13 @@ Developer: IT22304674 – Liyanage M.L.I.S.
 """
 
 import argparse
+import random
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import WeightedRandomSampler
+from collections import Counter
 from pathlib import Path
 import logging
 import json
@@ -60,6 +64,10 @@ class MediaPipeTrainer:
         
         self.best_val_acc = 0.0
         self.best_epoch = 0
+
+        # Automatic Mixed Precision scaler (GPU only)
+        self.use_amp = device.type == 'cuda'
+        self.scaler = torch.amp.GradScaler('cuda') if self.use_amp else None
     
     def train_epoch(self, dataloader, optimizer, criterion):
         """Train for one epoch."""
@@ -71,20 +79,45 @@ class MediaPipeTrainer:
         for batch_idx, (features, labels) in enumerate(dataloader):
             features = features.to(self.device)
             labels = labels.to(self.device)
-            
-            optimizer.zero_grad()
-            outputs = self.model(features)
-            
-            # Handle multi-stream model output (logits, attention_weights)
-            if isinstance(outputs, tuple):
-                logits, attention_weights = outputs
+
+            # MixUp augmentation — linearly interpolates two samples.
+            # Proven to improve generalization on sparse datasets.
+            if self.model.training and random.random() < 0.5:
+                lam = float(np.random.beta(0.4, 0.4))
+                idx = torch.randperm(features.size(0), device=self.device)
+                mixed_features = lam * features + (1 - lam) * features[idx]
+                labels_b = labels[idx]
             else:
-                logits = outputs
+                mixed_features = features
+                labels_b = None
+                lam = 1.0
+
+            optimizer.zero_grad()
+
+            with torch.amp.autocast('cuda', enabled=self.use_amp):
+                outputs = self.model(mixed_features)
+
+                # Handle multi-stream model output (logits, attention_weights)
+                if isinstance(outputs, tuple):
+                    logits, attention_weights = outputs
+                else:
+                    logits = outputs
+
+                if labels_b is not None:
+                    loss = lam * criterion(logits, labels) + (1 - lam) * criterion(logits, labels_b)
+                else:
+                    loss = criterion(logits, labels)
             
-            loss = criterion(logits, labels)
-            
-            loss.backward()
-            optimizer.step()
+            if self.scaler:
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.scaler.step(optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                optimizer.step()
             
             total_loss += loss.item()
             _, predicted = logits.max(1)
@@ -144,12 +177,11 @@ class MediaPipeTrainer:
             lr=learning_rate,
             weight_decay=weight_decay
         )
-        # Label smoothing prevents overconfidence on 227 classes with scarce data
         criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-        # Cosine warm restarts: LR cycles 0→max→0 every T_0 epochs then doubles each cycle.
-        # This helps escape plateaus that ReduceLROnPlateau gets stuck in.
-        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer, T_0=30, T_mult=2, eta_min=1e-6
+        # ReduceLROnPlateau: halves LR when val loss stops improving.
+        # More stable than cosine warm restarts for small datasets.
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-6
         )
         
         epochs_no_improve = 0
@@ -188,8 +220,8 @@ class MediaPipeTrainer:
             # Save latest model
             self._save_checkpoint('checkpoint_latest.pth', epoch, val_acc)
             
-            # Learning rate scheduling (cosine annealing, called each epoch)
-            scheduler.step()
+            # Learning rate scheduling (reduce on plateau, based on val loss)
+            scheduler.step(val_loss)
 
             # Early stopping
             if epochs_no_improve >= patience:
@@ -235,7 +267,7 @@ class MediaPipeTrainer:
             'best_epoch': int(self.best_epoch)
         }
         
-        with open(self.save_dir / 'test_results_mediapipe.json', 'w') as f:
+        with open(self.save_dir / 'test_results.json', 'w') as f:
             json.dump(results, f, indent=2)
         
         return test_loss, test_acc
@@ -246,14 +278,16 @@ def main():
     
     # Dataset arguments
     parser.add_argument('--dataset_root', type=str, 
-                       default='datasets/signVideo_subset50',
+                       default='datasets/signVideo',
                        help='Path to dataset root directory')
     
     # MediaPipe arguments
     parser.add_argument('--use_hands', action='store_true', default=True,
                        help='Use hand landmarks (default: True)')
-    parser.add_argument('--use_pose', action='store_true', default=False,
-                       help='Use pose landmarks for body context (default: False - diagnostic mode)')
+    parser.add_argument('--use_pose', action='store_true', default=True,
+                       help='Use pose landmarks for body context (default: True)')
+    parser.add_argument('--no_pose', action='store_false', dest='use_pose',
+                       help='Disable pose landmarks')
     parser.add_argument('--use_face', action='store_true', default=True,
                        help='Use facial landmarks (default: True)')
     parser.add_argument('--use_filtered_face', action='store_true', default=True,
@@ -275,14 +309,18 @@ def main():
     # Training arguments
     parser.add_argument('--batch_size', type=int, default=16,
                        help='Batch size')
-    parser.add_argument('--num_epochs', type=int, default=100,
+    parser.add_argument('--num_epochs', type=int, default=150,
                        help='Number of epochs')
     parser.add_argument('--learning_rate', type=float, default=0.001,
                        help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                        help='Weight decay (L2 regularization) (default: 1e-4)')
-    parser.add_argument('--patience', type=int, default=20,
+    parser.add_argument('--patience', type=int, default=30,
                        help='Early stopping patience')
+    parser.add_argument('--use_weighted_sampling', action='store_true', default=True,
+                       help='Balance class sampling during training (default: True)')
+    parser.add_argument('--no_weighted_sampling', action='store_false', dest='use_weighted_sampling',
+                       help='Disable weighted sampling')
     parser.add_argument('--augment', action='store_true', default=True,
                        help='Enable data augmentation for training (default: True)')
     parser.add_argument('--no_augment', action='store_false', dest='augment',
@@ -320,13 +358,14 @@ def main():
     else:
         cache_dir = Path(args.cache_dir)
     
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
     if args.save_dir is None:
-        save_dir = project_root / 'models' / 'mediapipe'
+        save_dir = project_root / 'models' / 'mediapipe' / f'run_{timestamp}'
     else:
         save_dir = Path(args.save_dir)
     
     if args.log_dir is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         log_dir = project_root / 'logs' / f'mediapipe_{timestamp}'
     else:
         log_dir = Path(args.log_dir)
@@ -427,14 +466,28 @@ def main():
     )
     
     # Create dataloaders
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0
-    )
+    # Weighted sampler: oversample rare signs, undersample common ones → balanced training
+    pin = (device.type == 'cuda')
+    if args.use_weighted_sampling:
+        train_labels = [label_idx for _, label_idx in splits['train']]
+        class_counts = Counter(train_labels)
+        sample_weights = [1.0 / class_counts[label_idx] for _, label_idx in splits['train']]
+        sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size, sampler=sampler,
+            num_workers=0, pin_memory=pin
+        )
+        logger.info("✓ Weighted random sampling enabled — all classes equally represented per epoch")
+    else:
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size, shuffle=True,
+            num_workers=0, pin_memory=pin
+        )
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+        val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=pin
     )
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+        test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=pin
     )
     
     # Create model
@@ -480,10 +533,10 @@ def main():
             face_dim=face_dim_val,
             pose_dim=pose_dim_val,
             num_classes=num_classes,
-            hand_hidden=128,
-            face_hidden=256,
-            pose_hidden=128,
-            fusion_dim=512,
+            hand_hidden=args.hidden_dim // 2,
+            face_hidden=args.hidden_dim,
+            pose_hidden=args.hidden_dim // 2,
+            fusion_dim=args.hidden_dim * 2,
             dropout=0.5,
             use_pose=args.use_pose
         )

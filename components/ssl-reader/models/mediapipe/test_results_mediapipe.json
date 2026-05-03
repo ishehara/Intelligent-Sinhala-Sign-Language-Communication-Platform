@@ -1,6 +1,13 @@
 {
+<<<<<<< Updated upstream
   "test_loss": 0.8397107637590833,
   "test_accuracy": 0.8010878010878011,
   "best_val_accuracy": 0.7628865979381443,
   "best_epoch": 87
+=======
+  "test_loss": 5.945185216990384,
+  "test_accuracy": 0.010014306151645207,
+  "best_val_accuracy": 0.03076923076923077,
+  "best_epoch": 144
+>>>>>>> Stashed changes
 }

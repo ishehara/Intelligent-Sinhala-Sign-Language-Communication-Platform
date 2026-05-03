@@ -1,0 +1,551 @@
+================================================================================
+  SINHALA SIGN LANGUAGE READER — METHODOLOGY
+  Research Paper Section: Component-Level Methodology
+  Developer: IT22304674 — Liyanage M.L.I.S.
+================================================================================
+
+
+1. OVERVIEW
+-----------
+This section describes the methodology for the Sinhala Sign Language (SSL)
+Reader component, which performs automatic sign language recognition from video
+input using a multi-stream deep learning approach. The system simultaneously
+analyses hand gestures, facial expressions, and body posture to produce a
+single, more accurate recognition output — moving beyond hand-only approaches
+that are common in existing work.
+
+The pipeline consists of four stages: (1) feature extraction using MediaPipe
+landmark detection, (2) root-relative coordinate normalisation, (3) skeleton-
+level data augmentation, and (4) multi-stream temporal deep learning using a
+purpose-built Multi-Stream Fusion Model.
+
+
+2. DATASET
+----------
+
+2.1 Source
+The dataset used is the signVideo dataset, a locally collected video dataset
+of Sinhala Sign Language. Each class folder contains multiple video recordings
+of a single signer performing the corresponding sign.
+
+2.2 Statistics
+  Total classes       : 383 Sinhala sign vocabulary items
+  Total videos        : 8,472
+  Average per class   : approximately 22 videos
+  Video format        : MP4 (variable frame rates and resolutions)
+
+2.3 Vocabulary Coverage
+The 383 classes span the following lexical categories:
+  - Greetings and social phrases
+  - People and relationships
+  - Numbers (cardinal and ordinal)
+  - Days of the week and months of the year
+  - Colours and descriptive adjectives
+  - Common nouns (objects, places, animals)
+  - Verbs and actions
+  - Prepositions, conjunctions, and determiners
+  - Adverbs and interjections
+
+2.4 Dataset Splits
+A stratified split was applied to ensure class balance across all partitions:
+  Training set    : 5,827 videos (68.8%)
+  Validation set  : 1,358 videos (16.0%)
+  Test set        : 1,287 videos (15.2%)
+
+Labels were stored in a unified label_mapping.json file mapping each Sinhala
+sign name to a zero-based integer class index, shared across all training
+and inference components.
+
+2.5 Data Scarcity Challenge
+With approximately 22 videos per class across 383 classes, the dataset is
+significantly under-resourced. This introduced a high risk of overfitting
+and required targeted strategies including skeleton-level augmentation,
+aggressive regularisation, and label smoothing (described in sections 5 and 7).
+
+
+3. FEATURE EXTRACTION
+----------------------
+
+3.1 Framework
+Feature extraction was performed using Google MediaPipe Tasks API
+(version 0.10.21). Three separate pre-trained MediaPipe task models were
+deployed:
+  - Hand Landmarker     (float16, GPU delegate)
+  - Face Landmarker     (float16, GPU delegate)
+  - Pose Landmarker     (full, float16)
+
+Each video was decoded frame-by-frame using OpenCV. Frames were converted from
+BGR to RGB before being passed to MediaPipe. A fixed temporal window of
+60 frames was used for all videos. Videos shorter than 60 frames were padded
+with zero vectors; videos longer were uniformly subsampled.
+
+3.2 Feature Streams
+Three distinct feature streams were extracted per frame:
+
+  (a) Hand Stream — 126 dimensions
+      Both hands were tracked simultaneously. Each hand provides 21 landmarks,
+      each with (x, y, z) normalised coordinates, giving 21 × 3 = 63 dimensions
+      per hand, and 126 dimensions total for both hands. When a hand was not
+      detected in a frame, the corresponding 63-dimensional block was set to
+      zero. Detection confidence thresholds were set to 0.3 for detection,
+      presence, and tracking to handle partially occluded or fast-moving hands.
+
+  (b) Face Stream — 232 dimensions
+      Rather than using all 468 MediaPipe face landmarks (which would produce
+      1,404 dimensions and introduce noise from irrelevant facial regions),
+      60 key facial landmarks were selected based on their relevance to
+      expression and sign language context:
+        - 12 landmarks covering both eyes (gaze direction, eye openness)
+        - 10 landmarks covering both eyebrows (raised/furrowed expression)
+        - 14 landmarks covering the mouth outline (speech, emotion)
+        - 4 landmarks at the nose (spatial reference)
+        - 20 landmarks tracing the face oval (structural context)
+      These 60 landmarks provide 60 × 3 = 180 spatial dimensions.
+      Additionally, 52 MediaPipe face blendshape scores were included,
+      capturing muscle-group-level expression coefficients (e.g., jaw open,
+      cheek raise, brow inner up). This gives 180 + 52 = 232 dimensions
+      for the face stream.
+
+  (c) Pose Stream — 99 dimensions
+      The MediaPipe Pose Landmarker provides 33 body landmarks. All 33
+      landmarks were extracted as (x, y, z) coordinates, giving
+      33 × 3 = 99 dimensions representing body posture, shoulder orientation,
+      and upper-body context.
+
+3.3 Combined Feature Vector
+For each frame, the three streams were concatenated in fixed order:
+  [hand features | face features | pose features]
+  = [126 | 232 | 99] = 457 dimensions per frame
+
+Each video was represented as a matrix of shape (60 frames × 457 features),
+which served as the input to the model.
+
+3.4 Feature Caching
+To avoid repeated feature extraction during training, extracted features were
+cached to disk as pickle files. The cache was keyed by the video file name and
+parent folder to prevent collisions across classes.
+
+
+4. ROOT-RELATIVE COORDINATE NORMALISATION
+------------------------------------------
+
+Raw MediaPipe landmark coordinates are expressed relative to the image frame
+(normalised image coordinates 0–1). These are sensitive to the signer's
+position and distance from the camera, which would cause the model to learn
+position-specific rather than sign-specific patterns.
+
+A root-relative normalisation was applied to all three streams after feature
+extraction and before any augmentation:
+
+  (a) Hand normalisation
+      All 21 landmarks of each hand were translated so that the wrist landmark
+      (landmark index 0) became the origin. This centres each hand's features
+      on its own wrist, making the representation invariant to where the hand
+      appears in the frame. Undetected hands (all-zero blocks) were left
+      unchanged.
+
+  (b) Face normalisation
+      All 60 key face landmarks were translated so that the nose tip (landmark
+      index 36 within the filtered set) became the origin. This removes
+      variation due to head position within the frame while preserving
+      expression-related geometry. The 52 blendshape scores, being scalar
+      values rather than spatial coordinates, were not altered.
+
+  (c) Pose normalisation
+      All 33 pose landmarks were translated so that the mid-shoulder point
+      (the average of left shoulder landmark 11 and right shoulder landmark 12)
+      became the origin. This removes variation due to the signer's distance
+      from and position within the camera frame.
+
+This normalisation was applied identically during training (via the dataset
+class) and during inference (replicated in the inference pipeline), ensuring
+that the distribution seen at inference time matched the distribution seen
+during training.
+
+
+5. DATA AUGMENTATION
+---------------------
+
+Due to the scarcity of training data (approximately 22 videos per class),
+skeleton-level augmentation was applied during training to artificially
+increase the effective diversity of the training set. Augmentation was
+performed on the raw (pre-normalisation) landmark features to preserve the
+geometric validity of the normalisation step.
+
+A stream-specific augmentation strategy was used for the Multi-Stream model,
+where each stream received targeted perturbations appropriate to its content.
+
+The following augmentation operations were applied stochastically:
+
+  5.1 Spatial Rotation
+      A random 2D rotation was applied to (x, y) coordinate pairs within
+      the hand and pose streams. Rotation angle was sampled uniformly from
+      the range [-5°, +5°]. This simulates natural variation in signing angle
+      and camera placement.
+
+  5.2 Spatial Scaling
+      A uniform scaling factor sampled from [0.9, 1.1] was applied to
+      coordinate values, simulating variation in the signer's distance from
+      the camera.
+
+  5.3 Gaussian Noise Injection
+      Small Gaussian noise with standard deviation 0.002 was added to all
+      coordinate features. This prevents the model from memorising exact
+      pixel-level positions and improves robustness to sensor noise.
+
+  5.4 Temporal Shifting
+      The entire sequence was shifted by a random number of frames (up to
+      ±10% of sequence length), with the vacated frames padded with zeros.
+      Applied with probability 0.3. This simulates natural variation in
+      signing onset and offset timing.
+
+  5.5 Time Warping
+      The temporal sequence was resampled at a randomly varied speed
+      (speed factor drawn from [0.8, 1.2]), then re-interpolated back to
+      60 frames using linear interpolation. Applied with probability 0.25.
+      This simulates faster or slower signing rates.
+
+  5.6 Frame Dropping
+      A random subset of frames (up to 20% of the sequence) was replaced with
+      zeros, simulating brief occlusion or detection failure. Applied with
+      probability 0.2.
+
+  5.7 Time Masking
+      A contiguous block of consecutive frames was masked to zero, simulating
+      a period where the signer's hands or face are briefly not visible.
+      Applied with probability 0.15.
+
+Each training sample had a global application probability of 0.7 — meaning
+30% of samples passed through the augmentation stage unchanged. Augmentation
+was disabled entirely for validation and test sets.
+
+Horizontal flipping was explicitly excluded from the augmentation pipeline
+because in sign language, left-right handedness carries semantic meaning and
+mirroring a sign can change or negate its meaning.
+
+
+6. MODEL ARCHITECTURE DEVELOPMENT
+-----------------------------------
+
+Four architectures were systematically explored before arriving at the final
+model. Each iteration addressed limitations observed in the previous design.
+
+  Model 1 — Multimodal LSTM (MultimodalLSTMModel)
+  -------------------------------------------------
+  The first architecture treated all three feature streams as a single
+  concatenated input vector (457 dimensions) fed into a bidirectional
+  two-layer LSTM (hidden size 256). A soft attention mechanism computed
+  a weighted sum over the LSTM's output at each time step, providing the
+  final representation for a two-layer classifier head.
+
+    Input: (batch, 60, 457) → Projection → BiLSTM → Attention → FC → logits
+    Parameters: ~3.1M
+    Validation accuracy: ~47%
+
+  Observation: The single-stream design caused the LSTM to struggle with the
+  heterogeneous nature of the concatenated features. Hand dynamics, face
+  expressions, and body posture have fundamentally different temporal
+  scales and spatial semantics; combining them early prevented the model
+  from specialising for each.
+
+  Model 2 — Multimodal Transformer (MultimodalTransformerModel)
+  --------------------------------------------------------------
+  The second architecture replaced the LSTM with a four-layer Transformer
+  encoder (d_model=256, 8 attention heads, GELU activation, sinusoidal
+  positional encoding). Global average pooling over the sequence produced
+  the final representation.
+
+    Input: (batch, 60, 457) → Linear → Positional Encoding → 4× Transformer
+           → AvgPool → FC → logits
+    Parameters: ~4.7M
+    Validation accuracy: ~41%
+
+  Observation: The Transformer improved long-range dependency modelling
+  but required more data to converge effectively. Its global attention over
+  the full 457-dimensional sequence was computationally expensive and showed
+  no benefit over the LSTM for this dataset size.
+
+  Model 3 — Hybrid LSTM + Transformer (HybridModel)
+  ---------------------------------------------------
+  The third architecture used a bidirectional LSTM to extract low-level
+  temporal features from the raw input, then projected the LSTM output
+  into a Transformer encoder for high-level reasoning. This was intended
+  to combine the inductive bias of the LSTM with the global attention
+  capacity of Transformers.
+
+    Input: (batch, 60, 457) → BiLSTM → Linear Projection → Positional Encoding
+           → 2× Transformer → AvgPool → FC → logits
+    Parameters: ~5.2M
+    Validation accuracy: ~52%
+
+  Observation: The hybrid improved over both predecessors by leveraging
+  local temporal patterns (LSTM) and global context (Transformer). However,
+  the single-stream design still conflated semantically different feature
+  types, limiting how well each sub-network could specialise.
+
+  Model 4 — Multi-Stream Fusion (MultiStreamFusionModel) [FINAL]
+  ---------------------------------------------------------------
+  The final architecture separated the three feature streams into independent
+  sub-networks, each designed to match the temporal characteristics of its
+  input modality. An attention-based fusion module then learned to weight
+  the contributions of each stream dynamically for each sign.
+
+  Full details are provided in Section 7.
+
+
+7. FINAL MODEL ARCHITECTURE — MULTI-STREAM FUSION MODEL
+---------------------------------------------------------
+
+7.1 Motivation
+The key insight driving the final architecture is that the three modalities
+captured by the system — hand gestures, facial expressions, and body posture —
+have fundamentally different temporal dynamics:
+  - Hand gestures exhibit rapid, high-frequency movements best captured by
+    convolutional filters that are sensitive to short-range temporal patterns.
+  - Facial expressions change more slowly and continuously, but still benefit
+    from convolutional feature hierarchy.
+  - Body posture changes gradually and benefits from sequential modelling
+    that can maintain context over the full sign duration.
+
+By routing each modality through a dedicated sub-network, the model can learn
+appropriate representations for each without interference.
+
+7.2 Architecture Diagram
+
+  Input: (batch, 60 frames, 457 features)
+         |
+         |--- Hand features (dims 0–125, 126 dims)
+         |       |
+         |       ↓ Hand TCN Stream
+         |    [TCN: 64 → 128 → 128 channels, kernel=5, dilations 1,2,4]
+         |    [Global Average Pooling]
+         |    → hand_out: (batch, 128)
+         |
+         |--- Face features (dims 126–357, 232 dims)
+         |       |
+         |       ↓ Face TCN Stream
+         |    [TCN: 128 → 256 → 256 channels, kernel=5, dilations 1,2,4]
+         |    [Global Average Pooling]
+         |    → face_out: (batch, 256)
+         |
+         |--- Pose features (dims 358–456, 99 dims)
+                 |
+                 ↓ Pose BiLSTM Stream
+              [BiLSTM: hidden=32 × 2 directions = 64, 1 layer]
+              [Adaptive Average Pooling]
+              → pose_out: (batch, 64)
+         |
+         ↓
+  Attention Fusion Module
+    [Project each stream to fusion dim 512]
+    [Compute scalar attention weight per stream]
+    [Softmax normalisation over 3 streams]
+    [Weighted sum → LayerNorm → Dropout(0.3)]
+    → fused: (batch, 512)
+         |
+         ↓
+  Classifier Head
+    [Linear(512 → 256) → ReLU → Dropout(0.3)]
+    [Linear(256 → 383)]
+    → logits: (batch, 383)
+
+  Also returns: attention_weights (batch, 3) — the learned importance weight
+                of each stream for each sample
+
+7.3 Hand TCN Stream
+The hand stream uses a three-level Temporal Convolutional Network (TCN) with
+increasing dilation rates (1, 2, 4) to capture hand motion patterns at
+multiple temporal scales. Each TCN block consists of two dilated Conv1D layers,
+each followed by BatchNorm and ReLU, with a residual skip connection. When
+the input and output channel dimensions differ, a 1×1 convolution is used
+for the skip connection. Channel dimensions progress as:
+  126 → 64 → 128 → 128
+Global average pooling over the time dimension produces a 128-dimensional
+representation of hand motion for the full 60-frame sequence.
+
+7.4 Face TCN Stream
+The face stream uses the same TCN architecture but with wider channels to
+accommodate the higher-dimensional and more information-dense face features:
+  232 → 128 → 256 → 256
+Global average pooling produces a 256-dimensional representation capturing
+expression dynamics across the signing sequence.
+
+7.5 Pose BiLSTM Stream
+Body posture changes gradually during signing. A bidirectional LSTM was used
+for the pose stream because LSTM's sequential gating mechanism is well-suited
+to modelling slow, contextual changes over time. The LSTM uses:
+  - Input dimension: 99
+  - Hidden size: 32 (each direction) → effective output dim: 64 (bidirectional)
+  - Layers: 1
+Adaptive average pooling over the output sequence produces a 64-dimensional
+representation of body posture context.
+
+7.6 Attention Fusion Module
+The three stream representations are fused using a learned attention mechanism:
+  - Each stream is projected to a common 512-dimensional fusion space using
+    a separate linear projection layer.
+  - A shared two-layer network (Linear → Tanh → Linear → scalar) computes
+    a raw attention score for each stream.
+  - Scores are passed through softmax to produce three normalised weights
+    that sum to 1.
+  - The final fused representation is the weighted sum of the three projected
+    streams, followed by Layer Normalisation and dropout.
+
+The attention weights are also returned as output, enabling inspection of
+which modality (hands, face, or pose) the model relies on most for each
+individual sign. This provides human-interpretable insight into the model's
+decision process.
+
+7.7 Classifier Head
+The 512-dimensional fused representation is passed through a two-layer
+fully-connected classifier:
+  Linear(512 → 256) → ReLU → Dropout(0.3) → Linear(256 → 383)
+producing logits over all 383 sign classes.
+
+7.8 Total Parameters
+Approximately 2.52 million trainable parameters.
+
+7.9 Output
+The model returns a tuple of:
+  - logits: (batch, 383) — unnormalised class scores
+  - attention_weights: (batch, 3) — stream importance weights [hands, face, pose]
+
+
+8. TRAINING CONFIGURATION
+---------------------------
+
+8.1 Loss Function
+Cross-entropy loss with label smoothing (ε = 0.1) was used. Label smoothing
+distributes a small portion of the probability mass from the true class to all
+other classes, preventing the model from becoming overconfident on the scarce
+training data and improving generalisation.
+
+8.2 Optimiser
+Adam optimiser with:
+  - Initial learning rate: 1 × 10⁻³
+  - Weight decay (L2 regularisation): 1 × 10⁻⁴
+  - β₁ = 0.9, β₂ = 0.999 (PyTorch defaults)
+
+8.3 Learning Rate Schedule
+Cosine Annealing with Warm Restarts (CosineAnnealingWarmRestarts) was used:
+  - T_0 = 30 epochs (first restart period)
+  - T_mult = 2 (each successive cycle is twice as long)
+  - η_min = 1 × 10⁻⁶ (minimum learning rate)
+This allows the optimiser to escape local minima by periodically resetting the
+learning rate to its maximum, while the extended cycle length after each restart
+gives the model time to converge further.
+
+8.4 Batch Size
+Batch size: 16, chosen to balance GPU memory constraints and gradient
+stability given the small dataset.
+
+8.5 Regularisation
+  - Dropout: 0.3 applied in all sub-networks and the classifier head
+  - Weight decay: 1 × 10⁻⁴ (L2 penalty on all parameters)
+  - Label smoothing: ε = 0.1
+  - Skeleton augmentation: applied stochastically during training (p=0.7)
+
+8.6 Early Stopping
+Training was stopped if validation accuracy did not improve for 20 consecutive
+epochs. The checkpoint producing the highest validation accuracy was retained
+as checkpoint_best.pth.
+
+8.7 Maximum Epochs
+Training was permitted up to 120 epochs with early stopping applied.
+
+8.8 Hardware
+Training was performed on a system with an NVIDIA GeForce MX350 GPU.
+Inference runs on CPU (suitable for mobile deployment).
+
+8.9 Framework
+  - Python 3.13
+  - PyTorch 2.7.1 + CUDA 11.8
+  - MediaPipe 0.10.21 (Tasks API)
+  - OpenCV 4.x
+  - NumPy, Pillow
+
+
+9. RESULTS
+-----------
+
+  Metric                         Value
+  ------------------------------------ -------
+  Best validation accuracy             76.3%
+  Test set accuracy                    80.1%
+  Best checkpoint epoch                87
+  Number of classes                    383
+  Total training videos                5,827
+  Total test videos                    1,287
+  Model parameters                     ~2.52M
+
+The test accuracy of 80.1% was achieved at epoch 87. The higher test accuracy
+relative to validation accuracy is consistent with the natural variance at this
+dataset scale; the checkpoint was selected based on validation performance alone.
+
+Model comparison across all four architectures:
+
+  Architecture                         Val Accuracy
+  ------------------------------------------------- ------
+  Multimodal LSTM (baseline)           ~47%
+  Multimodal Transformer               ~41%
+  Hybrid LSTM + Transformer            ~52%
+  Multi-Stream Fusion (final model)    76.3%
+
+The multi-stream approach produced a significant improvement of approximately
+24 percentage points over the best single-stream baseline (Hybrid model),
+demonstrating the effectiveness of independently processing the three modalities
+before fusing them.
+
+
+10. INFERENCE PIPELINE
+-----------------------
+
+10.1 Real-Time Operation
+At inference time, the system reads frames from a live camera feed using
+OpenCV. MediaPipe feature extraction and root-relative normalisation are
+applied to each incoming frame identically to the training pipeline. A rolling
+60-frame buffer accumulates features. When the buffer is full, the model
+performs a single forward pass and produces a predicted class.
+
+10.2 Prediction Output
+The top prediction is displayed as Sinhala Unicode text on-screen. Sinhala
+rendering used Pillow (PIL) with the Nirmala UI font (Nirmala.ttc), since
+OpenCV's built-in text renderer does not support Unicode. Confidence scores
+and the top-3 alternative predictions are also shown to assist users in
+ambiguous cases.
+
+10.3 Backend API
+A Flask REST API (react_native_bridge.py) wraps the model and exposes the
+inference pipeline over HTTP on port 5000. This allows the React Native mobile
+application to send video frame data and receive recognised sign predictions,
+enabling integration into the full platform without requiring the deep learning
+components to run on the mobile device itself.
+
+10.4 Checkpoint Loading
+At startup, the system loads checkpoint_best.pth using PyTorch's torch.load
+with the label-to-index mapping stored inside the checkpoint. The model is
+initialised with the exact same architecture configuration used during training
+and weights are loaded via load_state_dict to ensure consistency.
+
+
+11. KEY DESIGN DECISIONS AND THEIR RATIONALE
+---------------------------------------------
+
+  Challenge                         Solution adopted
+  --------------------------------- -----------------------------------------------
+  Data scarcity (~22 videos/class)  Skeleton augmentation (7 operation types),
+                                    label smoothing, weight decay, dropout
+  Heterogeneous feature modalities  Separate dedicated sub-networks per modality
+                                    (TCN for hands/face, BiLSTM for pose)
+  Position-dependent raw coords     Root-relative normalisation matching training
+                                    and inference pipelines exactly
+  Full 468-landmark face redundancy Filtered to 60 semantically meaningful
+                                    landmarks + 52 blendshape scores
+  Sinhala Unicode not shown by CV2  Replaced OpenCV text with PIL + Nirmala font
+  Single-stream conflation          Multi-stream fusion with attention weights,
+                                    enabling stream-level interpretability
+
+
+================================================================================
+  END OF METHODOLOGY DOCUMENT
+================================================================================

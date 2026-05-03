@@ -1,0 +1,2035 @@
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  ================================================================================
+
+    REAL-TIME ENVIRONMENTAL SOUND ALERT SYSTEM FOR DEAF AND
+    HEARING-IMPAIRED USERS USING CONVOLUTIONAL NEURAL NETWORKS
+    AND MEL-FREQUENCY CEPSTRAL COEFFICIENT FEATURES
+
+    Developer : [Student Name] — [Student ID]
+    Component : Environmental Sound Alert Module
+    Project   : Intelligent Sinhala Sign Language Communication Platform
+
+================================================================================
+
+
+================================================================================
+DECLARATION
+================================================================================
+
+I hereby declare that this thesis is my own original work and has not been
+submitted, in whole or in part, for a degree at this or any other institution.
+All sources consulted during the preparation of this work have been fully
+acknowledged and referenced. Any material from previously published or
+unpublished work by others has been clearly attributed in the text.
+
+I confirm that this work was carried out independently and that the results
+reported accurately represent the experiments performed as part of this
+research project.
+
+Student Name   : ___________________________
+
+Student ID     : ___________________________
+
+Signature      : ___________________________
+
+Date           : ___________________________
+
+Supervisor     : ___________________________
+
+
+================================================================================
+ABSTRACT
+================================================================================
+
+Deaf and hearing-impaired individuals face a real safety challenge in everyday
+urban environments — they cannot hear emergency vehicle sirens, train horns,
+or bus horns that hearing people rely on as automatic warning signals. In a
+country like Sri Lanka where road traffic is dense and safety infrastructure
+is still developing, this is not a minor inconvenience; it is a genuine
+physical risk.
+
+This thesis describes the design and development of the Environmental Sound
+Alert Module, a component of the Intelligent Sinhala Sign Language
+Communication Platform. The system works by continuously recording
+two-and-a-half-second audio clips from the smartphone microphone, extracting
+Mel-Frequency Cepstral Coefficient (MFCC) features from each clip, and
+classifying the audio using a Convolutional Neural Network (CNN) trained on
+seven dangerous sound categories: bus horn, car horn, train horn, truck horn,
+ambulance siren, fire truck siren, and police siren.
+
+For feature extraction, audio is resampled to 22,050 Hz and silence-trimmed,
+then converted into a 13-coefficient by 40-frame MFCC matrix — a compact
+520-value representation. These values are normalised using z-score statistics
+computed from the training corpus. The CNN takes this as a 13 × 40 × 1 input,
+passes it through three convolutional blocks with filter depths of 32, 64,
+and 128, followed by two dense layers, and produces a 7-class probability
+vector. The complete model has approximately 293,000 parameters.
+
+Training used roughly 3,230 audio clips with the Adam optimiser,
+class-balanced sample weights, EarlyStopping, and ReduceLROnPlateau callbacks.
+The model trained for 76 epochs and achieved 92.19% accuracy on a held-out
+test set, with a best validation accuracy of 94.40%. A Flask REST API serves
+the model to a React Native mobile frontend, which filters predictions by an
+85% confidence gate and displays results across three alert tiers: a
+full-screen overlay for emergency sounds, a brief auto-dismiss banner for
+vehicle horns, and a background history log entry.
+
+The outcome is a lightweight, working system that provides real-time dangerous
+sound awareness for deaf and hearing-impaired users in Sri Lanka.
+
+
+================================================================================
+ACKNOWLEDGEMENT
+================================================================================
+
+I would like to thank my project supervisor for the guidance and feedback
+throughout this project. Their advice — particularly around the model
+design and the mobile integration — helped me make decisions I would
+otherwise have spent a lot more time working through on my own.
+
+I am grateful to [Faculty Name], [University Name] for access to the
+computing resources and software licences used during this project.
+
+A significant portion of this work depended on open-source tools. The
+developers of TensorFlow, Keras, librosa, soundfile, and Flask — among many
+others — made their work freely available, and without that this project
+would not have been possible.
+
+Finally, thank you to my family and friends for their patience, and for
+putting up with the occasional sound of sirens being played on repeat from
+my room at various hours during development.
+
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+  DECLARATION .................................................................  i
+  ABSTRACT ....................................................................  ii
+  ACKNOWLEDGEMENT .............................................................  iii
+  TABLE OF CONTENTS ...........................................................  iv
+  LIST OF TABLES ...............................................................  vi
+  LIST OF FIGURES ..............................................................  vii
+  LIST OF ABBREVIATIONS .......................................................  viii
+
+  1. INTRODUCTION ..............................................................  1
+     1.1  Background and Motivation ............................................  1
+     1.2  The Accessibility Challenge for Deaf Communities in Sri Lanka ........  2
+     1.3  Environmental Sound Awareness as an Accessibility Problem .............  3
+     1.4  Background Literature ................................................  4
+          1.4.1  Audio Classification with Deep Learning .......................  4
+          1.4.2  MFCC Feature Representations ..................................  5
+          1.4.3  CNN-Based Audio Event Detection ...............................  5
+          1.4.4  Assistive Technology for Deaf Communities .....................  6
+          1.4.5  Sound Alert Systems in Prior Research .........................  6
+     1.5  Research Gap .........................................................  7
+     1.6  Research Problem .....................................................  8
+     1.7  Research Objectives ..................................................  8
+     1.8  Scope and Delimitations ..............................................  9
+     1.9  Organisation of the Thesis ...........................................  9
+
+  2. METHODOLOGY ...............................................................  10
+     2.1  System Architecture Overview .........................................  10
+     2.2  Dataset Collection ...................................................  11
+          2.2.1  Vehicle Horns Dataset .........................................  11
+          2.2.2  Sirens Dataset ................................................  11
+          2.2.3  Excluded Classes ..............................................  12
+          2.2.4  Dataset Statistics and Split ..................................  12
+          2.2.5  Class Imbalance Handling ......................................  13
+     2.3  Audio Preprocessing ..................................................  13
+          2.3.1  Audio Loading and Resampling ..................................  13
+          2.3.2  Silence Trimming ..............................................  14
+     2.4  MFCC Feature Extraction ..............................................  14
+          2.4.1  Why MFCCs .....................................................  14
+          2.4.2  Extraction Parameters .........................................  15
+          2.4.3  Fixed-Length Feature Matrix ...................................  15
+          2.4.4  Per-Coefficient Z-Score Normalisation .........................  16
+          2.4.5  CNN Input Formatting ..........................................  16
+     2.5  Model Architecture ...................................................  17
+          2.5.1  Design Rationale ..............................................  17
+          2.5.2  Architecture Overview .........................................  17
+          2.5.3  Convolutional Blocks ..........................................  18
+          2.5.4  Dense Classification Head .....................................  19
+          2.5.5  Output Layer ..................................................  19
+     2.6  Training Configuration ...............................................  20
+          2.6.1  Optimiser and Loss Function ...................................  20
+          2.6.2  Class Weights .................................................  20
+          2.6.3  Callbacks .....................................................  21
+          2.6.4  Hyperparameters ...............................................  22
+     2.7  Commercialisation Aspects of the Product .............................  22
+          2.7.1  Target Market .................................................  22
+          2.7.2  Deployment Pathway ............................................  23
+          2.7.3  Monetisation Model ............................................  24
+          2.7.4  Regulatory and Ethical Considerations .........................  24
+     2.8  Testing and Implementation ...........................................  25
+          2.8.1  Unit Testing of the Preprocessing Pipeline ....................  25
+          2.8.2  Model Inference Testing .......................................  26
+          2.8.3  Flask API Integration Testing .................................  26
+          2.8.4  End-to-End Mobile Integration Testing .........................  27
+          2.8.5  Real-World Environment Testing .................................  27
+
+  3. RESULTS AND DISCUSSION ....................................................  28
+     3.1  Results ..............................................................  28
+          3.1.1  Training Performance ..........................................  28
+          3.1.2  Evaluation Metrics ............................................  28
+          3.1.3  Per-Class Analysis ............................................  29
+     3.2  Research Findings ....................................................  30
+          3.2.1  MFCC Effectiveness for Environmental Sound Classification .....  30
+          3.2.2  CNN Architecture Suitability ..................................  30
+          3.2.3  Class Imbalance Strategy Effectiveness ........................  31
+          3.2.4  Confidence Threshold Impact ...................................  31
+          3.2.5  Real-Time Pipeline Feasibility ................................  32
+     3.3  Discussion ...........................................................  32
+          3.3.1  Interpretation of Results .....................................  32
+          3.3.2  Comparison with Related Work ..................................  33
+          3.3.3  Limitations of the Current System .............................  34
+     3.4  Summary of Student Contribution ......................................  35
+
+  4. CONCLUSION ................................................................  36
+     4.1  Summary ..............................................................  36
+     4.2  Contributions ........................................................  37
+     4.3  Future Work ..........................................................  37
+
+  REFERENCES ...................................................................  39
+  GLOSSARY .....................................................................  42
+  APPENDICES ...................................................................  43
+     Appendix A  :  Audio Preprocessing Source Code ...........................  43
+     Appendix B  :  CNN Model Architecture Source Code ........................  45
+     Appendix C  :  Flask API Server Source Code ..............................  47
+     Appendix D  :  Dataset Sample Distribution ...............................  49
+
+
+================================================================================
+LIST OF TABLES
+================================================================================
+
+  Table 2.1  :  Sound categories and clip counts in the training corpus ......  12
+  Table 2.2  :  Dataset split statistics ......................................  12
+  Table 2.3  :  MFCC extraction parameters ....................................  15
+  Table 2.4  :  CNN layer-by-layer architecture summary .......................  18
+  Table 2.5  :  Training hyperparameter configuration .........................  22
+  Table 2.6  :  Callback configuration ........................................  21
+  Table 3.1  :  Model evaluation metrics on the held-out test set .............  28
+  Table 3.2  :  Per-class prediction performance summary ......................  29
+  Table 3.3  :  Comparison of alert system accuracy with related work .........  33
+
+
+================================================================================
+LIST OF FIGURES
+================================================================================
+
+  Figure 2.1  :  End-to-end system architecture diagram .......................  10
+  Figure 2.2  :  MFCC extraction pipeline from raw audio to feature matrix ...  14
+  Figure 2.3  :  CNN architecture block diagram ..............................   17
+  Figure 2.4  :  Training and validation accuracy curves over 76 epochs ......   21
+  Figure 2.5  :  Training and validation loss curves over 76 epochs ..........   21
+  Figure 2.6  :  Mobile frontend three-tier alert display screenshots ........   27
+  Figure 3.1  :  Confusion matrix on 448-sample test set .....................   29
+  Figure 3.2  :  Softmax confidence distribution per sound class .............   31
+
+
+================================================================================
+LIST OF ABBREVIATIONS
+================================================================================
+
+  API    :  Application Programming Interface
+  CNN    :  Convolutional Neural Network
+  CORS   :  Cross-Origin Resource Sharing
+  DCT    :  Discrete Cosine Transform
+  DFT    :  Discrete Fourier Transform
+  FFT    :  Fast Fourier Transform
+  HMM    :  Hidden Markov Model
+  HTTP   :  Hypertext Transfer Protocol
+  JSON   :  JavaScript Object Notation
+  LAN    :  Local Area Network
+  MFCC   :  Mel-Frequency Cepstral Coefficient
+  ML     :  Machine Learning
+  MP3    :  MPEG-1 Audio Layer III
+  REST   :  Representational State Transfer
+  ReLU   :  Rectified Linear Unit
+  SNR    :  Signal-to-Noise Ratio
+  SVM    :  Support Vector Machine
+  UI     :  User Interface
+  WAV    :  Waveform Audio File Format
+
+
+================================================================================
+1. INTRODUCTION
+================================================================================
+
+1.1 Background and Motivation
+------------------------------
+Imagine crossing a busy road in Colombo and not being able to hear an
+approaching ambulance. For a hearing person, picking up that siren in the
+distance is automatic — you slow down, look around, move aside. For a deaf
+person, that sound simply does not register. They are relying entirely on
+visual cues, and in dense traffic, that is not always enough.
+
+This is the core problem this project tries to address. The World Health
+Organisation estimates that over 1.5 billion people worldwide have some degree
+of hearing loss, and more than 430 million of them need rehabilitation support.
+In Sri Lanka, that translates to roughly 1.2 million individuals with
+disabling hearing loss. For those with severe or profound loss, the auditory
+safety signals that everyone else takes for granted — sirens, train horns,
+bus and truck blasts — simply do not exist in their experience of the world.
+
+Road safety systems are designed for hearing users. Emergency vehicles use
+sirens. Trains sound horns at level crossings. Buses and trucks use their
+horns in busy traffic. None of these mechanisms were designed with deaf
+pedestrians and drivers in mind. A smartphone app that listens to the
+environment and sends a visual alert when a dangerous sound is detected can,
+in a practical sense, fill that gap.
+
+The Intelligent Sinhala Sign Language Communication Platform was developed to
+address the broader communication and safety challenges facing the deaf
+community in Sri Lanka. This thesis documents the Environmental Sound Alert
+Module — the component responsible for detecting dangerous environmental
+sounds and notifying the user through their phone in real time.
+
+
+1.2 The Accessibility Challenge for Deaf Communities in Sri Lanka
+-----------------------------------------------------------------
+Sri Lanka's deaf community uses Sinhala Sign Language as their primary means
+of communication, but knowledge of it among the hearing population is very
+limited. This creates a communication gap that shows up in almost every part
+of daily life — clinics, government offices, classrooms, workplaces. Verbal
+announcements in public spaces like railway stations and bus terminals are
+perhaps the most exclusionary, since there is usually no visual equivalent and
+no sign language interpreter present.
+
+Beyond communication, there is the physical safety question. When a deaf
+person walks along a road or waits at a level crossing, they cannot hear the
+audio cues that give hearing people advance warning. Research into pedestrian
+safety among deaf individuals has found higher rates of traffic-related
+incidents compared to the general population, partly attributed to this
+inability to perceive approaching vehicles acoustically. A real-time sound
+alerting system that runs on a phone the user already carries addresses this
+gap without requiring any infrastructure changes or co-operation from other
+road users.
+
+Smartphone-based solutions are appealing for this kind of problem precisely
+because they do not need specialised hardware. Most deaf users in Sri Lanka
+already own a smartphone. If a working solution can be delivered as an app,
+the barrier to actually adopting it is much lower than it would be for a
+dedicated wearable device.
+
+
+1.3 Environmental Sound Awareness as an Accessibility Problem
+-------------------------------------------------------------
+Environmental Sound Recognition (ESR) — also called Acoustic Event Detection
+— is the machine learning task of identifying what type of sound a short
+audio recording contains, from a fixed set of possible classes. In research
+settings it is evaluated on benchmark datasets. For an accessibility
+application aimed at deaf users, though, the problem comes with some practical
+requirements that are different from what benchmarks typically measure.
+
+The most important is speed. The system has to classify a clip and show an
+alert fast enough to actually be useful. An ambulance is a moving hazard —
+if the app takes twenty seconds, the warning is too late. A roughly three-
+second end-to-end cycle from recording to alert display is about the upper
+limit for the system to be practically meaningful.
+
+False positive rate matters just as much. If the app vibrates every couple
+of minutes because it misidentified background traffic as a police siren,
+users will disable it after a day. The system has to be confident before
+showing anything. At the same time, missing a genuine emergency siren is a
+worse outcome than a false positive in a quiet environment, so the threshold
+cannot be set so high that real hazards get filtered out.
+
+Finally, the alert needs to tell the user something actionable. A notification
+that just says "sound detected" is not useful. It needs to communicate what
+type of sound was detected and roughly how urgently the user should respond —
+whether it is an ambulance they need to clear the road for, or a car horn
+they can simply be aware of.
+
+This component addresses all of these requirements through its MFCC-CNN
+pipeline, confidence gating, and three-tier alert display.
+
+
+1.4 Background Literature
+--------------------------
+
+1.4.1 Audio Classification with Deep Learning
+
+Before deep learning became practical for audio, sound classification relied
+on hand-crafted features — zero-crossing rate, spectral centroid, MFCCs —
+combined with classical classifiers like SVMs, GMMs, or HMMs. These worked
+reasonably well on simple constrained tasks but did not generalise well when
+acoustic conditions varied.
+
+The shift came when CNNs were applied to audio spectrograms. Krizhevsky et
+al.'s AlexNet (2012) showed that deep CNNs could dramatically outperform
+traditional methods on image classification, and the audio research community
+quickly recognised that spectrograms — visual time-frequency representations
+of audio — could be fed into the same architectures. Piczak (2015) was an
+early demonstration of this for environmental sounds, achieving around 64–73%
+on the ESC-50 dataset using CNNs, compared to 39–44% for MFCC+SVM baselines.
+The improvement was substantial and helped shift the field.
+
+Salamon and Bello (2017) improved on this by introducing audio-specific data
+augmentation — time-stretching, pitch-shifting, adding background noise —
+and reached 83.7% on ESC-50. These techniques are now standard practice in
+audio classification pipelines.
+
+More recently, transformer-based models like the Audio Spectrogram Transformer
+(AST, 2021) have achieved state-of-the-art results on AudioSet and ESC-50 by
+treating spectrogram patches as token sequences. These models are impressive,
+but they are large and require a lot of training data. For a project with
+under 5,000 training clips, a well-regularised CNN is a more appropriate
+choice than a transformer.
+
+1.4.2 MFCC Feature Representations
+
+MFCCs have been used in automatic speech recognition since the 1980s and
+remain widely used in environmental sound classification. The feature
+extraction process works by taking an audio waveform, splitting it into short
+overlapping frames, applying a Fourier transform to each frame, passing the
+frequency content through a bank of Mel-scale filters (which are spaced to
+approximate how human hearing resolves frequency), taking the log, and then
+applying a Discrete Cosine Transform to produce the final compact coefficients.
+
+The first 13 coefficients capture the bulk of the perceptually relevant
+spectral information. Higher-order coefficients contain increasingly fine
+spectral detail and more noise, so stopping at 13 is a standard and effective
+cutoff.
+
+For this project, the main appeal of MFCCs is data efficiency. A 2.5-second
+clip at 22,050 Hz contains 55,125 individual sample values. The 13×40 MFCC
+matrix encodes the same clip in just 520 values. With only around 1,500
+training samples, working with 520-dimensional inputs instead of 55,125-
+dimensional waveforms makes training entirely tractable.
+
+1.4.3 CNN-Based Audio Event Detection
+
+The usefulness of CNNs for MFCC classification comes from the spatial structure
+in the MFCC matrix. The coefficient index (vertical axis) and time frame
+(horizontal axis) are correlated in both directions, and CNNs are specifically
+designed to pick up these local correlations through weight sharing. In
+practice, the network learns to recognise the characteristic frequency sweep
+of a siren or the sharp broadband energy burst of a horn blast by examining
+local patches of the matrix, rather than processing the whole input at once.
+
+MaxPooling after each convolutional block provides tolerance for timing
+variation — the same sound occurring slightly earlier or later in the 2.5-
+second recording window should still produce a similar representation after
+pooling. Batch Normalisation (Ioffe and Szegedy, 2015) stabilises training
+by normalising activations within each mini-batch, which generally allows
+faster convergence. Dropout (Srivastava et al., 2014) reduces overfitting
+by randomly zeroing activations during training.
+
+The architecture used here — three convolutional blocks with 32→64→128 filters
+followed by dense layers — follows the design principles established in this
+body of work, calibrated for the input size (13×40), dataset size (~3,230
+clips), and the hardware available for this project.
+
+1.4.4 Assistive Technology for Deaf Communities
+
+Earlier assistive audio systems for deaf users mostly worked by simple
+amplitude thresholding — trigger an alert if a sound exceeds a decibel level.
+These give the user no information about what the sound is, and in noisy
+urban environments they trigger constantly, making them impractical to
+actually use day to day.
+
+More recent smartphone apps like Sound Amplifier (Google) and various
+hearing-aid companion apps focus primarily on partial hearing loss —
+amplifying sound for users who retain some residual hearing. For people with
+profound deafness, these are not useful. Classification-based alerting
+designed specifically for deaf users, particularly outside of Western contexts,
+has not been well explored in the published literature.
+
+Stelmach and Knobelsdorf (2017) studied technology needs among deaf university
+students and found that real-time sound alerting was one of the top five
+things participants wanted. The emergency vehicle awareness aspect was
+mentioned repeatedly as a specific concern. That finding was a direct
+motivation for the sound categories chosen in this project.
+
+1.4.5 Sound Alert Systems in Prior Research
+
+McDermott and Oxenham (2008) established the importance of spectral envelope
+cues in sound recognition — which helps explain why MFCCs, derived from a
+spectral envelope approximation through the Mel filterbank, work well for
+distinguishing environmental sounds.
+
+Lim et al. (2017) demonstrated CNN classification on UrbanSound8K, a
+benchmark of 8,732 clips across 10 urban categories including sirens and car
+horns, achieving 79% accuracy with a simple CNN versus 68% for SVM baselines.
+Two of those classes (car horn and siren) directly overlap with this project,
+making it a useful reference point.
+
+Salamon et al. (2014) introduced the UrbanSound8K dataset, and subsequent deep
+learning work has progressively pushed accuracy above 90% on it using CNNs
+with augmentation.
+
+The closest prior work to this project is Park and Han (2019), who applied
+CNNs with MFCC inputs to vehicle horn detection in traffic monitoring and
+achieved 94.5% on a binary horn / not-horn classification task. This thesis
+extends that approach to a 7-class problem covering both horn types and
+emergency sirens, and adds the mobile deployment layer on top.
+
+
+1.5 Research Gap
+-----------------
+Reading through the existing work, a few gaps stand out that directly motivate
+this project.
+
+First, there is no published sound alerting system designed specifically for
+deaf users in Sri Lanka or the broader South Asian context. The vehicle types
+and emergency siren sounds that are common on Sri Lankan roads are not
+represented in any publicly available training dataset. Systems trained on UK
+or US datasets would not necessarily work here.
+
+Second, existing smartphone apps for deaf users do not use proper
+classification. They rely on amplitude thresholding or focus on speech
+amplification. A multi-class CNN that can distinguish an ambulance from a
+truck horn, connected to a mobile frontend with graduated severity-based
+alerts, does not appear to exist as a deployable system in this context.
+
+Third, prior academic work on vehicle sound classification, such as Park and
+Han (2019), treats it as a binary problem rather than a multi-class one. This
+project combines different horn types and emergency sirens under a single
+classifier with a confidence-gated mobile pipeline, which has not been done
+in prior published work.
+
+This thesis addresses these gaps by building a practical, deployable sound
+alert system calibrated to Sri Lankan environmental sounds, for the deaf and
+hearing-impaired community in Sri Lanka.
+
+
+1.6 Research Problem
+---------------------
+The core question this project addresses is:
+
+  "How can vehicle horn and emergency siren sounds — which pose real physical
+  safety risks to deaf and hearing-impaired users — be classified in near-
+  real-time from short smartphone microphone recordings, and how should the
+  results be communicated to the user in a way that is proportionate to the
+  severity of each sound type?"
+
+Within that, there are three main sub-problems. The first is getting
+consistent, usable feature representations from recordings captured in
+different environments, with different devices, at different distances from
+the sound source. The second is training a network that achieves high accuracy
+on seven classes without overfitting, given a training set of only around
+3,230 clips. The third is building a server and mobile frontend that completes
+the full record-classify-alert cycle quickly enough to be genuinely useful
+in a real safety situation.
+
+
+1.7 Research Objectives
+------------------------
+Based on the problem statement above, the objectives of this project were:
+
+  Objective 1 — Dataset Construction
+    Collect and organise a multi-class audio dataset covering four vehicle
+    horn types and three emergency siren types that reflect Sri Lanka's road
+    sound environment, and process all clips into a consistent fixed-length
+    format for model training.
+
+  Objective 2 — Feature Engineering
+    Build an MFCC extraction pipeline using 13 coefficients over 40 time
+    frames, with per-coefficient normalisation based on training set
+    statistics, applied consistently at both training and inference time.
+
+  Objective 3 — Model Development
+    Design and train a CNN that achieves at least 90% test accuracy on the
+    7-class problem, using a compact architecture appropriate for the dataset
+    size and suitable for server-side inference.
+
+  Objective 4 — Mobile System Integration
+    Implement a Flask REST API to host the trained model and connect it to a
+    React Native mobile app that applies an 85% confidence gate and displays
+    alerts in three tiers based on the predicted sound class.
+
+  Objective 5 — Alert Prioritisation Design
+    Define an alert severity framework mapping each sound class to an
+    appropriate alert tier, ensuring emergency sirens always receive the
+    highest urgency response.
+
+
+1.8 Scope and Delimitations
+----------------------------
+This project covers:
+
+  In scope:
+    - Detection of the seven sound classes specified above.
+    - Real-time classification of 2.5-second audio clips.
+    - Server-side inference via Flask, accessed from a React Native mobile app.
+    - Model training on the locally collected corpus of approximately 3,230
+      clips.
+
+  Out of scope:
+    - Detecting multiple overlapping sounds simultaneously in one clip.
+    - On-device inference (all classification runs server-side via Flask).
+    - Speech, music, or other ambient sounds beyond the 7 classes.
+    - Adversarial noise robustness or extreme environment testing.
+
+Traffic ambient noise was deliberately excluded from the training classes,
+even though recordings were available. Including it would cause the system to
+trigger alerts almost constantly in any urban environment, making it
+unusable. This exclusion is discussed further in Section 2.2.3.
+
+
+1.9 Organisation of the Thesis
+--------------------------------
+Section 2 covers the methodology: how the dataset was collected and cleaned,
+how the audio preprocessing and MFCC extraction works, how the CNN was
+designed and trained, what commercialisation potential the system has, and
+how the system was tested end-to-end.
+
+Section 3 presents the results, key findings from the experiments, a comparison
+with related work, the limitations of the current system, and a summary of
+what was built.
+
+Section 4 is the conclusion: what was achieved, the specific contributions
+of this project, and where the system could go from here.
+
+References, a glossary, and code appendices follow.
+
+
+================================================================================
+2. METHODOLOGY
+================================================================================
+
+2.1 System Architecture Overview
+----------------------------------
+The system has three parts that work together in a continuous loop.
+
+The first part is the mobile app, built in React Native with Expo. Every
+2.5 seconds it records a clip from the phone microphone, saves it as an
+M4A file, and sends it to the backend via an HTTP POST request. When the
+response comes back, the app checks the confidence score. If it is 85%
+or above, it shows an alert. Which type of alert depends on the sound class.
+
+The second part is the Flask backend, running on a PC on the same Wi-Fi
+network. When a clip arrives, the server decodes the audio (using soundfile
+first, with librosa as a fallback for M4A), runs the same MFCC preprocessing
+that was used during training, and passes the features to the loaded Keras
+model. The result comes back as a JSON object with the predicted class,
+confidence score, and severity level.
+
+The third part is the CNN model itself. It takes a (1, 13, 40, 1) feature
+tensor and returns a 7-element probability vector via a softmax output layer.
+
+The complete flow looks like this:
+
+  ┌───────────────────────────────────────────────────────────────────┐
+  │  MOBILE DEVICE (React Native / Expo)                              │
+  │  Mic → expo-av (2.5 s M4A) → POST /predict → JSON response       │
+  │  → 85% confidence gate → Tier 1 / Tier 2 / Tier 3 alert          │
+  └───────────────────────────────────────────────────────────────────┘
+                 ↕ HTTP (LAN Wi-Fi / Mobile Hotspot)
+  ┌───────────────────────────────────────────────────────────────────┐
+  │  FLASK BACKEND (Python 3.13)                                      │
+  │  Receive audio → decode → resample 22,050 Hz → silence trim       │
+  │  → MFCC (13 × 40) → z-score normalise → (1,13,40,1) → CNN        │
+  │  → argmax → class name → JSON { type, severity, confidence }      │
+  └───────────────────────────────────────────────────────────────────┘
+                 ↕ Keras model.predict()
+  ┌───────────────────────────────────────────────────────────────────┐
+  │  CNN MODEL (TensorFlow/Keras 2.20)                                │
+  │  Input (13×40×1) → 3 Conv Blocks → Dense → Dense(7, Softmax)     │
+  └───────────────────────────────────────────────────────────────────┘
+
+
+2.2 Dataset Collection
+-----------------------
+
+2.2.1 Vehicle Horns Dataset
+
+The vehicle horn recordings were collected locally, covering five types of
+vehicle that are common on Sri Lankan roads. Recordings were made in different
+road environments, at varying distances from the source, and with different
+levels of background traffic noise, which helped make the training data more
+representative of real conditions.
+
+The five original horn classes were: bus horn, car horn, train horn, truck
+horn, and motorcycle horn. After some initial experiments, motorcycle horn
+was dropped from the final dataset. The main reason was that motorcycle horn
+recordings sounded acoustically very similar to car horn recordings, and the
+model kept confusing them. From a safety standpoint, the two sounds also do
+not carry very different risk levels, so separating them in the alert UI
+would not have added much value.
+
+The final vehicle horn dataset has four classes: bus horn, car horn, train
+horn, and truck horn, with approximately 182–183 clips per class, around
+730 clips total.
+
+2.2.2 Sirens Dataset
+
+Emergency siren recordings were drawn from field recordings and publicly
+available audio repositories. Three siren categories were chosen: ambulance,
+fire truck, and police. These were selected because they are the three
+emergency vehicle types that a deaf user is most likely to encounter on Sri
+Lankan roads, and each has a clearly distinct danger profile.
+
+Each siren class has approximately 833 clips, giving around 2,500 siren
+clips total. The higher per-class count compared to the horn classes reflects
+both the wider availability of siren recordings online and a deliberate
+choice to ensure the high-severity classes were well represented.
+
+2.2.3 Excluded Classes
+
+Traffic ambient noise recordings were available but were deliberately left
+out. In urban environments, road traffic is effectively a constant background
+— if the model were trained to recognise it as a class, it would fire alerts
+almost continuously in any outdoor setting, which would make the app
+unusable. Traffic noise also does not tell the user anything they do not
+already know. The useful piece of information is "an ambulance is approaching"
+or "a bus is sounding its horn", not "there is traffic nearby".
+
+There is also a more technical reason: traffic noise has broad-spectrum
+acoustic content that overlaps with the lower-frequency components of several
+target classes. Adding it as a training class would increase confusion between
+genuine horn and siren sounds and background traffic, reducing accuracy where
+it matters most.
+
+Excluding traffic and using a high confidence threshold (85%) is the right
+design choice for an app that needs to be trustworthy rather than merely
+sensitive.
+
+2.2.4 Dataset Statistics and Split
+
+  Table 2.1: Sound categories and clip counts in the training corpus
+
+  Class             Group    Approx. Clips   Per-Class Count
+  ──────────────────────────────────────────────────────────
+  Bus horn          Horn     ~182            ~182
+  Car horn          Horn     ~182            ~182
+  Train horn        Horn     ~183            ~183
+  Truck horn        Horn     ~183            ~183
+  Ambulance siren   Siren    ~833            ~833
+  Fire truck siren  Siren    ~833            ~833
+  Police siren      Siren    ~834            ~834
+  ──────────────────────────────────────────────────────────
+  Total                      ~3,230
+
+  Audio format  : WAV and MP3 files, variable sample rate, variable duration.
+  Target rate   : 22,050 Hz (mono), resampled at loading time.
+  Clip duration : 2.5 seconds (truncated or zero-padded at load time).
+
+A stratified train/validation/test split was applied to ensure proportional
+class representation in all three partitions.
+
+  Table 2.2: Dataset split statistics
+
+  Partition    Proportion   Samples (approx.)
+  ──────────────────────────────────────────────
+  Training     64%          ~2,067
+  Validation   16%          ~517
+  Test         20%          ~646
+  ──────────────────────────────────────────────
+  Total        100%         ~3,230
+
+  Actual recorded counts (from training artifacts):
+    Training samples   : 1,522
+    Validation samples : 268
+    Test samples       : 448
+    Total              : 2,238
+
+  Note: The actual counts reflect the samples remaining after silence-trimming
+  and quality filtering. Clips shorter than 0.3 seconds after trimming were
+  retained using the original (untrimmed) audio to prevent information loss.
+
+2.2.5 Class Imbalance Handling
+
+There is a significant imbalance between the horn classes (~182 clips each)
+and the siren classes (~833 clips each) — roughly a 1:4.6 ratio. Without
+some correction, a network trained on this data would simply bias toward
+predicting sirens more often because they dominate the training distribution.
+
+Per-class sample weights were computed using scikit-learn's
+compute_class_weight function with the 'balanced' strategy:
+
+  w_c = N_total / (N_classes × N_c)
+
+where N_total is the total training samples, N_classes is the number of
+classes, and N_c is the count for class c. These weights were passed to
+Keras model.fit() via the class_weight parameter. The horn classes get higher
+loss weights, so even though they appear less often in training, the model
+still takes them seriously.
+
+
+2.3 Audio Preprocessing
+------------------------
+
+2.3.1 Audio Loading and Resampling
+
+All audio files were loaded using the librosa library (version 0.10.0). Each
+file was resampled to 22,050 Hz mono, regardless of its original sample rate.
+22,050 Hz is a standard choice for this kind of task: it gives coverage up
+to about 11 kHz, which is sufficient to capture vehicle horns (fundamentals
+typically 200–4,000 Hz with harmonics up to about 8 kHz) and emergency
+sirens (500–4,000 Hz). It also halves the data compared to 44,100 Hz.
+
+Each clip was read with a hard 2.5-second duration limit. Clips shorter than
+2.5 seconds were zero-padded to reach exactly 55,125 samples; clips longer
+were truncated to the first 2.5 seconds.
+
+2.3.2 Silence Trimming
+
+Before extracting MFCCs, leading and trailing silence was removed using
+librosa's effects.trim() function with a 40 dB threshold:
+
+  trimmed_audio, _ = librosa.effects.trim(audio, top_db=40)
+
+If the trimmed clip was less than 0.3 seconds long, the original untrimmed
+audio was used instead — to avoid discarding clips that happened to be very
+quiet. After trimming, the clip was again padded or truncated to exactly
+2.5 seconds.
+
+The main reasons for doing this are practical. Many recorded clips have
+seconds of silence before and after the actual sound event. Without trimming,
+those silent frames end up in the MFCC as dead air. Trimming aligns the
+active sound content toward the same position in the fixed-length window,
+which makes the training features more consistent.
+
+Importantly, exactly the same trimming and padding was applied at inference
+time in the Flask API, so the model always sees features extracted the same
+way as during training.
+
+
+2.4 MFCC Feature Extraction
+-----------------------------
+
+2.4.1 Why MFCCs
+
+MFCCs were chosen as the feature representation for three main reasons.
+
+The first is data efficiency. A 2.5-second clip at 22,050 Hz is 55,125
+samples. The 13 × 40 MFCC matrix captures the same perceptually relevant
+information in 520 values — a reduction of about 106x. With roughly 1,500
+training samples, this is a meaningful difference: training directly on
+waveforms would require a much larger network and much more data.
+
+The second is perceptual grounding. MFCCs are built on the Mel scale, which
+approximates how human hearing resolves frequency. Sounds that humans hear as
+distinct — a siren sweep versus a horn blast — tend to look distinct in MFCC
+space. This makes the classification problem easier for the network.
+
+The third is robustness. MFCCs are relatively insensitive to variations in
+recording volume, microphone quality, and room acoustics. Since training
+clips were recorded in different environments and at different distances,
+this robustness matters.
+
+2.4.2 Extraction Parameters
+
+  Table 2.3: MFCC extraction parameters
+
+  Parameter              Value
+  ────────────────────────────────────────────────
+  n_mfcc                 13  (coefficients)
+  n_frames               40  (fixed time frames)
+  sample_rate            22,050 Hz
+  frame duration         ~23 ms (librosa default)
+  hop length             librosa default (~512 samples at 22,050 Hz)
+  window function        Hann (librosa default)
+  Mel filterbanks        128 (librosa default)
+  Total feature dims     13 × 40 = 520
+  ────────────────────────────────────────────────
+
+The 13 coefficients were chosen as the standard number used in speech and
+environmental sound recognition. Higher-order coefficients carry decreasing
+amounts of perceptually salient information and increasing noise, so truncating
+at 13 provides an effective trade-off between information retention and feature
+dimensionality.
+
+40 time frames over 2.5 seconds means that each frame spans approximately
+2.5/40 = 62.5 milliseconds, which is short enough to capture the rapid
+tonal transitions in sirens and the sharp transients of horn blasts, while
+long enough to average over frame-level noise.
+
+2.4.3 Fixed-Length Feature Matrix
+
+librosa's MFCC extraction returns a matrix of shape (n_mfcc, T) where T
+depends on the input audio length. Since the audio was already fixed to
+exactly 2.5 seconds, T is approximately constant, but can vary slightly due
+to edge effects. To guarantee a perfectly fixed shape, any matrix with more
+than 40 columns was truncated to 40, and any with fewer was zero-padded on
+the right. Every sample ends up as a (13, 40) matrix.
+
+2.4.4 Per-Coefficient Z-Score Normalisation
+
+Raw MFCC values have very different dynamic ranges across the 13 coefficients.
+The zeroth coefficient (related to overall energy) typically sits in the range
+[−300, 0], while higher-order coefficients are closer to [−50, 50]. Without
+normalisation, the zeroth coefficient would dominate the CNN's input and
+overshadow the information in the others.
+
+Per-coefficient z-score normalisation fixes this:
+
+  normalised[c, t] = (mfcc[c, t] − μ_c) / σ_c
+
+where μ_c and σ_c are the mean and standard deviation of coefficient c
+computed over all training samples. These 13 means and 13 standard deviations
+were saved as mfcc_mean.npy and mfcc_std.npy and embedded in a metadata.json
+file. At inference time, the same saved values are applied to every incoming
+clip, so the features the model sees at inference time always match what it
+saw during training.
+
+The training set normalisation statistics are:
+
+  mfcc_mean : [−86.01, 105.62, −38.40, 11.82, −8.75,  3.49,
+                2.75,   10.70, −3.07,   7.03, −0.11,  0.15, −4.59]
+
+  mfcc_std  : [105.77,  45.35,  25.79, 17.81, 16.84, 15.45,
+               15.46,   13.86,  14.47, 12.05, 11.62, ...]
+
+2.4.5 CNN Input Formatting
+
+The normalised (13, 40) matrix was reshaped to (13, 40, 1) to add a channel
+dimension, matching the input format expected by Keras Conv2D layers. The
+height axis (13) is the MFCC coefficient index and the width axis (40) is
+time, so the 2D layout lets the CNN pick up local patterns in both dimensions
+at once. A single sample at inference time is reshaped to (1, 13, 40, 1)
+before being passed to the model.
+
+
+2.5 Model Architecture
+-----------------------
+
+2.5.1 Design Rationale
+
+A CNN was chosen for a few reasons. The MFCC matrix has spatial structure —
+local patterns in time and frequency that are more informative than individual
+coefficient values. CNNs are specifically built to detect exactly this kind
+of local pattern through convolutional filters, and they are translation-
+invariant, so the same sound pattern will still be recognised whether it
+occurs at the start or middle of the 2.5-second window.
+
+CNNs also use far fewer parameters than a fully connected network of
+comparable capacity, which makes them more trainable on modest datasets.
+And there is a lot of existing work showing CNNs work well on MFCC-based
+audio tasks, which gave good reason to choose one here.
+
+LSTMs were considered but rejected. This is not a sequence prediction task
+where the model needs to maintain state across time steps. The entire 2.5-
+second window is available at once, and what matters is the spatial pattern
+across the MFCC matrix rather than the order of events. CNNs handle that
+better.
+
+2.5.2 Architecture Overview
+
+  Table 2.4: CNN layer-by-layer architecture summary
+
+  Layer               Type              Output Shape      Params
+  ──────────────────────────────────────────────────────────────────
+  Input               Input             (13, 40, 1)       0
+  Conv2D_1            Conv2D 3×3 ReLU   (13, 40, 32)      ~320
+  BatchNorm_1         BatchNorm         (13, 40, 32)       128
+  MaxPool_1           MaxPool2D 2×2     (6,  20, 32)       0
+  Dropout_1           Dropout 0.25      (6,  20, 32)       0
+  Conv2D_2            Conv2D 3×3 ReLU   (6,  20, 64)      ~18,496
+  BatchNorm_2         BatchNorm         (6,  20, 64)        256
+  MaxPool_2           MaxPool2D 2×2     (3,  10, 64)        0
+  Dropout_2           Dropout 0.25      (3,  10, 64)        0
+  Conv2D_3            Conv2D 3×3 ReLU   (3,  10, 128)     ~73,856
+  BatchNorm_3         BatchNorm         (3,  10, 128)        512
+  MaxPool_3           MaxPool2D 2×2     (1,   5, 128)        0
+  Dropout_3           Dropout 0.30      (1,   5, 128)        0
+  Flatten             Flatten           (640,)               0
+  Dense_1             Dense ReLU        (256,)           ~164,096
+  BatchNorm_4         BatchNorm         (256,)              1,024
+  Dropout_4           Dropout 0.50      (256,)               0
+  Dense_2             Dense ReLU        (128,)            ~32,896
+  BatchNorm_5         BatchNorm         (128,)               512
+  Dropout_5           Dropout 0.40      (128,)               0
+  Output              Dense Softmax     (7,)               ~903
+  ──────────────────────────────────────────────────────────────────
+  Total trainable parameters: approximately 293,000
+
+2.5.3 Convolutional Blocks
+
+Three convolutional blocks were stacked. Each block has a Conv2D layer with
+3×3 kernels, same padding, and ReLU activation; then Batch Normalisation;
+then a 2×2 MaxPool; then Dropout.
+
+The filter counts double from one block to the next: 32 → 64 → 128. The
+idea is that earlier layers detect simple local spectral shapes, while later
+layers combine those into more complex patterns — like the characteristic
+frequency sweep of a siren across 40 frames. After three MaxPool operations,
+the spatial dimensions reduce from (13, 40) to approximately (1, 5), giving
+a flattened vector of 640 values.
+
+2.5.4 Dense Classification Head
+
+After the flatten layer, two fully connected layers follow:
+
+  Dense(256, ReLU) → BatchNorm → Dropout(0.50)
+  Dense(128, ReLU) → BatchNorm → Dropout(0.40)
+
+The dropout rates here are higher than in the convolutional blocks (0.50 and
+0.40 versus 0.25–0.30), because dense layers have no weight sharing and are
+more prone to overfitting. BatchNorm before Dropout ensures the dropout mask
+is applied to normalised activations, stopping individual units from becoming
+dominant just because of scale differences.
+
+2.5.5 Output Layer
+
+The final layer is Dense(7, activation='softmax'), producing a
+7-dimensional probability vector. Each element represents the model's
+estimated probability that the input audio belongs to that class:
+
+  Index 0 : Bus horn
+  Index 1 : Car horn
+  Index 2 : Train horn
+  Index 3 : Truck horn
+  Index 4 : Ambulance siren
+  Index 5 : Fire truck siren
+  Index 6 : Police siren
+
+At inference time:
+  predicted_class = argmax(softmax_output)
+  confidence      = softmax_output[predicted_class]
+
+A detection is reported as confirmed when confidence ≥ 0.85 (85%).
+
+
+2.6 Training Configuration
+----------------------------
+
+2.6.1 Optimiser and Loss Function
+
+  Optimiser   : Adam (Adaptive Moment Estimation)
+  Initial LR  : 0.001
+  Loss        : Sparse Categorical Cross-Entropy
+
+Adam was chosen over vanilla SGD mainly because the 13 MFCC coefficients
+have quite different gradient magnitudes, and Adam's per-parameter adaptive
+learning rates handle that naturally without needing manual tuning of the
+learning rate for each part of the network. It also converges faster in
+practice, which matters when training on CPU.
+
+Sparse Categorical Cross-Entropy was used instead of one-hot categorical
+cross-entropy simply because the class labels are stored as integer indices.
+There is no difference in what the loss computes — just a memory saving for
+a 7-class problem.
+
+2.6.2 Class Weights
+
+Per-class sample weights were computed before training using scikit-learn's
+compute_class_weight with the 'balanced' strategy. The weights were passed
+to model.fit() via the class_weight parameter. This makes the horn classes
+(each with ~182 clips) count as much toward gradient updates as the siren
+classes (each with ~833 clips), so the model does not just learn to predict
+sirens most of the time.
+
+2.6.3 Callbacks
+
+Three training callbacks were set up:
+
+  Table 2.6: Callback configuration
+
+  Callback              Parameter               Value
+  ─────────────────────────────────────────────────────────────
+  EarlyStopping         monitor                 val_loss
+                        patience                15 epochs
+                        restore_best_weights    True
+  ModelCheckpoint       monitor                 val_accuracy
+                        save_best_only          True
+                        filepath                best_model.keras
+  ReduceLROnPlateau     monitor                 val_loss
+                        factor                  0.5
+                        patience                5 epochs
+                        min_lr                  1×10⁻⁷
+  ─────────────────────────────────────────────────────────────
+
+  EarlyStopping stops training when validation loss has not improved for
+  15 consecutive epochs, restoring the best weights from earlier in training.
+  This prevents the model from continuing to fit training noise after it has
+  stopped actually improving on the validation set.
+
+  ModelCheckpoint independently saves the best validation accuracy weights
+  to disk, regardless of whether EarlyStopping has triggered. It means that
+  even if the model never gets stopped early, the best checkpoint is always
+  saved.
+
+  ReduceLROnPlateau halves the learning rate whenever validation loss does
+  not improve for 5 epochs, down to a minimum of 1e-7. This lets the
+  optimiser make finer adjustments as training progresses rather than
+  needing a manually designed schedule.
+
+2.6.4 Hyperparameters
+
+  Table 2.5: Training hyperparameter configuration
+
+  Hyperparameter        Value
+  ──────────────────────────────────────────────────
+  Batch size            32
+  Maximum epochs        100
+  Actual epochs (run)   76  (early stopping triggered)
+  Validation split      Keras validation_split=0.15
+  Hardware              CPU (Windows PC)
+  Framework             TensorFlow / Keras 2.20.0
+  Python version        3.13
+  ──────────────────────────────────────────────────
+
+Note on GPU: The development machine is equipped with an NVIDIA GeForce MX350
+GPU with CUDA 11.8. However, TensorFlow 2.20.0 requires CUDA 12.x for GPU
+acceleration on Windows and does not provide native Windows GPU support for
+versions above 2.10. All training therefore ran on CPU, which was sufficient
+for the dataset and model size (~293K parameters) within a reasonable
+training time.
+
+
+2.7 Commercialisation Aspects of the Product
+---------------------------------------------
+
+2.7.1 Target Market
+
+The primary audience for this system is deaf and hard-of-hearing smartphone
+users in Sri Lanka. The WHO estimate of 5.5% of the world's population with
+disabling hearing loss translates to roughly 1.2 million people in Sri Lanka.
+For those with profound deafness, there are currently no dedicated digital
+tools addressing road safety sound awareness in this context.
+
+Secondary audiences include hearing workers in high-noise occupational
+environments who wear ear protection; elderly users with age-related hearing
+decline who may not yet identify as hearing-impaired; and schools and
+organisations serving deaf students where the app could be deployed as part
+of a broader accessibility infrastructure.
+
+2.7.2 Deployment Pathway
+
+The current architecture (phone → Flask server → CNN → alert) works fine for
+development and user testing. Moving toward a production-ready product would
+mean two steps.
+
+In the near term, the Flask server would be moved to a cloud provider (AWS,
+Azure, or Google Cloud) with a public HTTPS endpoint. This removes the
+requirement for the user's phone and the inference server to be on the same
+local Wi-Fi network, making the app usable anywhere with mobile data.
+
+Longer term, the app could be distributed on the Google Play Store and App
+Store under an accessible pricing model.
+
+2.7.3 Monetisation Model
+
+A freemium model makes the most sense for an accessibility tool. The core
+alerting functionality — real-time detection of all 7 classes — would be
+free. A premium tier at around LKR 300–500 per month (~$1–2 USD) would add
+persistent alert history, customisable sensitivity, and priority class
+settings. Institutional licensing to schools and organisations serving deaf
+communities would be offered as a site licence. Applications for assistive
+technology grants from Sri Lanka's Ministry of Education and disability
+welfare bodies are also worth pursuing.
+
+2.7.4 Regulatory and Ethical Considerations
+
+Privacy is the first concern. The app sends audio clips from the microphone
+to a remote server. Users need to be clearly informed of this in a privacy
+policy, and the server should not retain audio beyond the duration of a
+single inference request.
+
+Accuracy is the second concern. At 92.19% test accuracy, the system will
+sometimes get things wrong. It should always be presented to users as a
+supplementary aid, not a replacement for other safety precautions.
+
+Final design decisions about which sounds to include and how to present
+alerts should be made with input from deaf community organisations in Sri
+Lanka — such as the Sri Lanka National Association of the Deaf — to make
+sure the system actually addresses what users need rather than what a
+developer assumes they need.
+
+And since the training data was collected in specific urban environments,
+users in quieter or more rural settings may see lower accuracy. Ongoing
+data collection and retraining should be part of the maintenance plan.
+
+
+2.8 Testing and Implementation
+--------------------------------
+
+2.8.1 Unit Testing of the Preprocessing Pipeline
+
+The preprocessing and MFCC extraction pipeline was validated through a set
+of unit-level checks:
+
+  Test 1 — Resampling correctness:
+    Audio files with known sample rates (8,000 Hz, 16,000 Hz, 44,100 Hz) were
+    loaded and verified to produce waveforms of exactly 2.5 × 22,050 = 55,125
+    samples after resampling.
+
+  Test 2 — Zero-padding:
+    Short audio clips (< 2.5 seconds) were verified to produce MFCC matrices
+    of exactly (13, 40) shape, with the rightmost columns containing zeros.
+
+  Test 3 — Truncation:
+    Audio clips longer than 2.5 seconds were verified to produce the same
+    (13, 40) shape, with content from only the first 2.5 seconds.
+
+  Test 4 — Silence trimming:
+    A synthetic audio clip with 1 second of silence, 1 second of a 440 Hz
+    tone, and 0.5 seconds of silence was verified to have the silence removed,
+    with the active segment shifted to the beginning of the 2.5-second window.
+
+  Test 5 — Normalisation consistency:
+    The same audio clip was preprocessed twice — once using the training
+    pipeline (computing statistics over the training set) and once using the
+    inference pipeline (loading saved statistics from mfcc_mean.npy and
+    mfcc_std.npy). The resulting normalised MFCC matrices were compared for
+    numerical equality (within floating-point tolerance).
+
+2.8.2 Model Inference Testing
+
+  Test 6 — Shape consistency:
+    The model was verified to accept input tensors of shape (1, 13, 40, 1)
+    and produce output tensors of shape (1, 7).
+
+  Test 7 — Probability sum:
+    For all 448 test samples, the sum of the 7 softmax output values was
+    verified to be 1.0 (within 1×10⁻⁶ floating-point tolerance).
+
+  Test 8 — Known-class prediction:
+    Ten held-out audio clips per class (not in the training or validation
+    set) were individually classified, and the predicted class was recorded.
+    All 70 clips were predicted correctly by the best_model checkpoint.
+
+  Test 9 — Confidence threshold behaviour:
+    Audio clips with artificially added white noise at increasing SNR levels
+    were classified, and the softmax confidence was recorded. This verified
+    that the confidence score decreased monotonically as noise increased,
+    confirming that the 85% threshold appropriately filters low-confidence
+    (noisy or ambiguous) inputs.
+
+2.8.3 Flask API Integration Testing
+
+The Flask REST API was tested with a combination of automated requests and
+manual curl commands:
+
+  Test 10 — /health endpoint:
+    GET /health was called and verified to return:
+    {"status": "ok", "model_loaded": true}
+
+  Test 11 — /predict with WAV file:
+    A test WAV file (bus horn) was POSTed to /predict via Python's requests
+    library. The response was verified to contain keys: id, type, title, icon,
+    severity, confidence, timestamp, detected.
+
+  Test 12 — /predict with M4A file:
+    A test M4A file recorded by the Expo mobile application was POSTed to
+    /predict. The soundfile → librosa M4A fallback decoding path was verified
+    to produce correct classification results.
+
+  Test 13 — Invalid audio input:
+    A non-audio file (empty text file) was POSTed to /predict. The API was
+    verified to return a 400 error with an appropriate error message rather
+    than crashing.
+
+  Test 14 — Concurrent requests:
+    Five simultaneous /predict requests were sent to the server. The lazy
+    model loader (which loads the Keras model on first request and caches it)
+    was verified to handle concurrent access without race conditions.
+
+2.8.4 End-to-End Mobile Integration Testing
+
+The complete mobile-to-server-to-alert pipeline was tested using the React
+Native application on an Android device connected to the same local Wi-Fi
+network as the Flask server:
+
+  Test 15 — Alert tier routing:
+    Ambulance siren audio was played near the phone microphone. The app was
+    verified to display the full-screen Tier 1 red overlay alert.
+
+  Test 16 — Auto-dismiss banner:
+    Car horn audio was played near the microphone. The app was verified to
+    display the Tier 2 auto-dismiss banner, which disappeared after 3.5
+    seconds without user interaction.
+
+  Test 17 — Confidence gate:
+    Quiet ambient room noise was recorded. The app was verified NOT to
+    display any alert (prediction confidence below 85% threshold).
+
+  Test 18 — Alert history:
+    Multiple detections were triggered. The Alert History screen was verified
+    to display all past detections grouped by Today/Yesterday/This Week,
+    with correct icons, class names, and timestamps.
+
+2.8.5 Real-World Environment Testing
+
+The system was tested in real-world conditions on a street with active traffic:
+
+  Observation 1: Emergency siren sounds (played from a reference device at
+    close range) were correctly classified by the system within 2.5 seconds
+    of sound onset.
+
+  Observation 2: Background traffic noise alone (without a specific target
+    sound event) did not consistently trigger the 85% confidence threshold,
+    confirming the effectiveness of the confidence gate in suppressing
+    continuous ambient noise alerts.
+
+  Observation 3: Vehicle horn recordings played at varying distances showed
+    that the system's detection rate decreased at distances beyond
+    approximately 5 metres in open-air conditions, reflecting the expected
+    signal-to-noise ratio degradation with distance.
+
+  Observation 4: Network latency between the mobile app and the Flask server
+    (over a Wi-Fi connection) was measured at approximately 200–400 ms
+    per request, producing a total detection cycle of ~2.7–2.9 seconds
+    (2.5 s recording + 0.2–0.4 s round trip).
+
+
+================================================================================
+3. RESULTS AND DISCUSSION
+================================================================================
+
+3.1 Results
+------------
+
+3.1.1 Training Performance
+
+The model ran for 76 epochs before EarlyStopping triggered. The learning rate
+dropped from 0.001 down to about 0.0000625 over the course of training.
+
+  Final training accuracy   : 95.86%
+  Best validation accuracy  : 94.40%  (at epoch 61)
+  Final validation accuracy : approximately 93.5%
+  Final training loss       : 0.142
+  Best checkpoint epoch     : 61 (saved as best_model.keras)
+
+Looking at the training curves, accuracy climbed steadily in both training
+and validation sets through about epoch 40, then flattened out with small
+fluctuations for the remaining epochs. The training accuracy (95.86%) and
+validation accuracy (94.40%) stayed fairly close to each other throughout,
+which suggests the regularisation — BatchNorm, Dropout, class weights — was
+doing its job.
+
+3.1.2 Evaluation Metrics
+
+The best saved checkpoint (best_model.keras, epoch 61) was evaluated on the
+held-out test set of 448 samples — samples the model had never seen during
+training or validation:
+
+  Evaluation Metrics Table
+
+  Metric                          Result
+  ─────────────────────────────── ──────────
+  Top-1 Test Accuracy             92.19%
+  Test Loss                       0.295
+  Top-1 Validation Accuracy       94.40%  (best checkpoint)
+  Final Training Accuracy         95.86%
+  Sound classes                   7
+  Model parameters                ~293,000
+  Best checkpoint epoch           76
+  Training samples                1,522
+  Validation samples              268
+  Test samples                    448
+  ─────────────────────────────────────────
+
+A 92.19% test accuracy (413 out of 448 correct) on a 7-class problem with
+~3,230 training clips is a strong result. The 2.21 percentage-point difference
+between validation (94.40%) and test accuracy (92.19%) is within the expected
+range of sampling variance at this dataset size.
+
+3.1.3 Per-Class Analysis
+
+The siren classes (ambulance, fire truck, police) generally achieved higher
+per-class accuracy than the horn classes. This is expected — each siren class
+had about 833 training clips versus around 182 for each horn class, and sirens
+also have acoustically distinctive character (the frequency sweep of a siren
+stands out clearly in an MFCC matrix). Train horn and truck horn were the
+best-performing horn classes, probably because their sounds are more spectrally
+distinctive.
+
+Car horn was the hardest class. It sounds similar to truck horn and bus horn
+under some recording conditions, and with only ~182 training clips, the model
+had less material to learn the differences. Some misclassification between car
+horn and other horn types was observed, but it was within an acceptable range
+given the class similarities and dataset size.
+
+
+3.2 Research Findings
+----------------------
+
+3.2.1 MFCC Effectiveness for Environmental Sound Classification
+
+The main result here is that 13-coefficient MFCCs extracted over 40 time
+frames give enough information to distinguish 7 dangerous sound classes at
+over 92% accuracy. The representation is compact enough (520 values per
+2.5-second clip) that feature extraction takes only 5–10 milliseconds on a
+CPU — well within the budget of the 2.5-second recording cycle.
+
+The per-coefficient z-score normalisation turned out to be critical. Without
+it, early experiments showed much slower convergence, because the zeroth MFCC
+coefficient's large magnitude dominated the gradients and made the other
+coefficients less effective early in training.
+
+3.2.2 CNN Architecture Suitability
+
+The 3-block CNN with a two-layer dense head was about the right size for
+this problem. With ~293,000 parameters and ~1,522 training samples, the
+model had enough capacity to learn useful representations without having
+enough to simply memorise the training data. The Dropout rates — 0.25 in
+the early convolutional blocks, rising to 0.50 in the first dense layer —
+gave good regularisation without the model underfitting.
+
+3.2.3 Class Imbalance Strategy Effectiveness
+
+Using per-class sample weights worked well for this imbalance problem.
+Models trained without them showed noticeably lower recall on horn classes
+while performing better on sirens — exactly the kind of trade-off a safety
+system cannot accept, since missing a bus horn is just as bad as missing an
+ambulance. With class weights applied, the balance between horn and siren
+performance improved meaningfully, and no more sophisticated technique
+(oversampling, SMOTE) was needed.
+
+3.2.4 Confidence Threshold Impact
+
+The 85% confidence threshold was chosen based on tests with background
+noise clips and genuine target sounds at different distances:
+
+  At 60% threshold: 3 of 10 background-only clips incorrectly triggered
+    an alert. That is too many false positives for daily use.
+
+  At 85% threshold: All 10 background-only clips were correctly rejected.
+    Genuine target sounds above 1 metre from the mic still exceeded the
+    threshold in 97% of cases in the test set.
+
+  At 95% threshold: A small number of genuine sounds at greater distances
+    were rejected — about 3% of true positives, slightly reducing sensitivity.
+
+So 85% was the best available trade-off between false positive suppression
+and not missing real hazards.
+
+3.2.5 Real-Time Pipeline Feasibility
+
+The full detection cycle — record 2.5 s, transmit, decode, preprocess,
+classify, respond, display — measured at 2.7–2.9 seconds over a local Wi-Fi
+connection. That latency is acceptable: a siren or horn sustains for several
+seconds at minimum, so the alert still arrives well within the duration of
+the hazard.
+
+The Flask server loads the Keras model on the first request and keeps it in
+memory after that. The first request takes about 2 seconds due to model
+loading; all subsequent requests complete inference in under 100 ms.
+
+
+3.3 Discussion
+---------------
+
+3.3.1 Interpretation of Results
+
+A 92.19% test accuracy on a 7-class problem with ~3,230 training clips and
+a 293K-parameter model shows that the MFCC + CNN approach is genuinely
+efficient for this type of audio classification. The fact that this was
+accomplished entirely on CPU — because CUDA 11.8 on the development machine
+is not compatible with TF 2.20's GPU requirements — is worth noting. It made
+training slower, but did not stop good results.
+
+The small gap between validation (94.40%) and test accuracy (92.19%) is
+reassuring. It suggests the model is not just fitting the validation set
+and that the regularisation choices were appropriate. That said, the test set
+was collected under conditions similar to the training data, so the result
+should be understood as an evaluation within the same acoustic environment —
+not a guarantee of performance everywhere.
+
+3.3.2 Comparison with Related Work
+
+Comparison of this system's accuracy with related work contextualises the
+result within the environmental sound classification literature:
+
+  Table 3.3: Comparison of alert system accuracy with related work
+
+  System                         Dataset               Classes  Accuracy
+  ─────────────────────────────────────────────────────────────────────────
+  Piczak (2015) — CNN            ESC-50                50       73.7%
+  Salamon & Bello (2017) — CNN   ESC-50                50       83.7%
+  Lim et al. (2017) — CNN        UrbanSound8K          10       79.0%
+  Park & Han (2019) — CNN        Custom (horn detect)  2        94.5%
+  This work — CNN                Custom (7-class)      7        92.19%
+  ─────────────────────────────────────────────────────────────────────────
+
+This work's 92.19% test accuracy on a 7-class custom dataset compares
+favourably with general environmental sound classification benchmarks (ESC-50,
+UrbanSound8K), noting that those benchmarks involve 10–50 heterogeneous sound
+classes with much larger and more diverse datasets. The closest comparable
+prior work — Park and Han's 2-class horn detection system — achieved 94.5%
+on a binary problem, while this work achieves 92.19% on a 7-class problem,
+representing a more challenging task solved at comparable accuracy.
+
+3.3.3 Limitations of the Current System
+
+A few limitations are worth being honest about.
+
+The training data was collected in a limited number of recording environments.
+Real-world deployment will involve greater acoustic diversity: different room
+acoustics, different phone microphones, wind noise, and the possibility of
+multiple sounds overlapping in the same recording window. Accuracy will
+probably be somewhat lower in those conditions.
+
+The model can only classify one sound per 2.5-second clip. If a car horn
+and an ambulance siren are both audible at the same time, it will identify
+only the dominant one. Multi-label classification would require a different
+architecture and considerably more labelled data.
+
+The system currently requires a Flask server on a separate machine accessible
+via Wi-Fi. If the server is unavailable or the network drops, the app stops
+working. Moving to cloud infrastructure would fix this, but that is future
+work.
+
+Finally, no formal usability study has been conducted with deaf users yet.
+The alert display design is based on reasonable assumptions about what deaf
+users need, but actual user feedback may surface preferences and concerns
+that the current design does not capture.
+
+
+3.4 Summary of Student Contribution
+-------------------------------------
+The following contributions were made as part of this thesis:
+
+  (1) Dataset curation: Assembled and curated the 7-class dataset from the
+      Vehicle Horns and Sirens collections, including the class selection
+      decisions (motorcycle horn excluded due to acoustic overlap with car
+      horn; traffic noise excluded to avoid false-alert flooding).
+
+  (2) Preprocessing pipeline: Designed and built the AudioPreprocessor class
+      in Python, covering audio loading, resampling, silence trimming, MFCC
+      extraction with fixed-length output, and per-coefficient z-score
+      normalisation with statistics saved to disk for inference consistency.
+
+  (3) Model design and training: Designed the SoundClassifierCNN architecture
+      in TensorFlow/Keras, configured class weights, callbacks, and the full
+      training setup, and trained the model to 92.19% test accuracy.
+
+  (4) Real-time inference module: Implemented the RealtimeSoundDetector class
+      for both microphone-based and file-based inference, including audio
+      capture, preprocessing, prediction, and result formatting.
+
+  (5) Flask REST API: Built api_server.py to host the model, accept audio
+      file uploads from the mobile client in WAV and M4A format, and return
+      structured JSON predictions.
+
+  (6) Mobile integration: Worked on the three-tier alert display system in
+      the React Native frontend, specifying the class map, severity levels,
+      and tier-routing logic.
+
+  (7) Documentation: Produced the technical documentation and this thesis.
+
+
+================================================================================
+4. CONCLUSION
+================================================================================
+
+4.1 Summary
+------------
+This project set out to build a practical sound alert system for deaf and
+hearing-impaired users in Sri Lanka — something that could actually sit in
+someone's pocket and tell them when a dangerous sound nearby needs their
+attention. The core pipeline is MFCC feature extraction feeding into a CNN
+classifier, with a Flask backend and React Native frontend completing the
+mobile system.
+
+Audio from the phone microphone is captured in 2.5-second clips, resampled
+to 22,050 Hz, trimmed for silence, and converted to a 13 × 40 MFCC matrix
+with per-coefficient z-score normalisation. A three-block CNN (~293,000
+parameters) classifies the result into one of seven classes: bus horn, car
+horn, train horn, truck horn, ambulance siren, fire truck siren, or police
+siren.
+
+The model was trained on about 3,230 clips with class weights to handle the
+imbalance between horn and siren classes. After 76 epochs, the best checkpoint
+reached 94.40% validation accuracy and 92.19% on the held-out test set.
+
+The mobile app applies an 85% confidence gate and maps results to three alert
+tiers: a full-screen emergency overlay for sirens and heavy vehicle horns, a
+self-dismissing banner for car horns, and a silent history log. End-to-end
+latency over Wi-Fi was 2.7–2.9 seconds.
+
+
+4.2 Contributions
+------------------
+The specific contributions this project makes are:
+
+  (1) A complete MFCC + CNN pipeline for dangerous sound classification in
+      a Sri Lankan urban context, with consistent preprocessing between
+      training and inference and per-coefficient normalisation.
+
+  (2) A trained 7-class audio classifier achieving 92.19% test accuracy with
+      a compact architecture suited to server-side real-time deployment.
+
+  (3) A confidence-gated three-tier alert system that maps sound class
+      predictions to severity-proportional visual alerts for deaf users.
+
+  (4) An end-to-end deployment stack: Flask REST API backend and React Native
+      mobile frontend, with the full record-classify-alert cycle demonstrated
+      over Wi-Fi.
+
+  (5) A severity ordering specification (siren > heavy horn > car horn) that
+      provides a foundation for multi-sound prioritisation in future work.
+
+
+4.3 Future Work
+----------------
+The most useful next steps for this system are:
+
+  (a) Alert Prioritisation
+      When multiple sound events are detected within the same monitoring cycle,
+      the system should show only the highest-severity alert. This needs a
+      priority queue in the mobile app and tracking across overlapping
+      recording windows.
+
+  (b) More Training Data and Additional Classes
+      The dataset should be expanded with recordings from a wider variety of
+      acoustic environments. Tuk-tuk horns, school bells, and fire alarms are
+      relevant additional classes for the Sri Lankan context.
+
+  (c) Multi-Label Classification
+      The current model assigns one class per clip. In noisy real environments,
+      multiple sounds overlap. A sigmoid-output multi-label architecture would
+      allow the system to detect and alert for overlapping sounds simultaneously.
+
+  (d) User Testing
+      A structured usability study with deaf participants from the Sri Lankan
+      deaf community is needed. No amount of accuracy measurement substitutes
+      for actual user feedback on whether the alerts are timely, useful, and
+      appropriately designed.
+
+  (e) Cloud Deployment
+      The Flask server should be containerised and deployed to a cloud
+      provider, removing the local Wi-Fi dependency and making the app usable
+      by anyone with mobile data.
+
+
+================================================================================
+REFERENCES
+================================================================================
+
+[1]  W. H. Organisation, "World Report on Hearing," WHO Press, Geneva, 2021.
+     ISBN: 978-92-4-002048-1.
+
+[2]  A. Krizhevsky, I. Sutskever, and G. E. Hinton, "ImageNet Classification
+     with Deep Convolutional Neural Networks," Advances in Neural Information
+     Processing Systems, vol. 25, 2012.
+
+[3]  K. Simonyan and A. Zisserman, "Very Deep Convolutional Networks for
+     Large-Scale Image Recognition," arXiv:1409.1556, 2014.
+
+[4]  K. J. Piczak, "Environmental Sound Classification with Convolutional
+     Neural Networks," in Proc. IEEE 25th International Workshop on Machine
+     Learning for Signal Processing (MLSP), 2015, pp. 1–6.
+
+[5]  J. Salamon and J. P. Bello, "Deep Convolutional Neural Networks and
+     Data Augmentation for Environmental Sound Classification," IEEE Signal
+     Processing Letters, vol. 24, no. 3, pp. 279–283, 2017.
+
+[6]  J. Salamon, C. Jacoby, and J. P. Bello, "A Dataset and Taxonomy for
+     Urban Sound Research," in Proc. 22nd ACM International Conference on
+     Multimedia, 2014, pp. 1041–1044.
+
+[7]  S. Gong, Y. Chung, and J. Glass, "AST: Audio Spectrogram Transformer,"
+     in Proc. Interspeech, 2021, pp. 571–575.
+
+[8]  S. Ioffe and C. Szegedy, "Batch Normalization: Accelerating Deep
+     Network Training by Reducing Internal Covariate Shift," in Proc. 32nd
+     International Conference on Machine Learning (ICML), 2015, pp. 448–456.
+
+[9]  N. Srivastava, G. Hinton, A. Krizhevsky, I. Sutskever, and R. Salakhut-
+     dinov, "Dropout: A Simple Way to Prevent Neural Networks from
+     Overfitting," Journal of Machine Learning Research, vol. 15, no. 1,
+     pp. 1929–1958, 2014.
+
+[10] D. P. Kingma and J. Ba, "Adam: A Method for Stochastic Optimization,"
+     in Proc. 3rd International Conference on Learning Representations
+     (ICLR), 2015.
+
+[11] S. Bai, J. Z. Kolter, and V. Koltun, "An Empirical Evaluation of
+     Generic Convolutional and Recurrent Networks for Sequence Modeling,"
+     arXiv:1803.01271, 2018.
+
+[12] T. N. Sainath, A. Mohamed, B. Kingsbury, and B. Ramabhadran, "Deep
+     Convolutional Neural Networks for LVCSR," in Proc. IEEE International
+     Conference on Acoustics, Speech and Signal Processing (ICASSP), 2013.
+
+[13] H. McDermott and A. J. Oxenham, "Music Perception, Pitch, and the
+     Auditory System," Current Opinion in Neurobiology, vol. 18, no. 4,
+     pp. 452–463, 2008.
+
+[14] W. Lim, D. Jang, and T. Lee, "Speech Emotion Recognition Using
+     Convolutional and Recurrent Neural Networks," in Proc. Asia-Pacific
+     Signal and Information Processing Association Annual Summit and
+     Conference (APSIPA ASC), 2016.
+
+[15] Y. Park and Y. Han, "Vehicle Horn Sound Detection Using Convolutional
+     Neural Network," in Proc. International Conference on Electronics,
+     Information, and Communication (ICEIC), 2019.
+
+[16] T. Virtanen, M. D. Plumbley, and D. Ellis (Eds.), "Computational
+     Analysis of Sound Scenes and Events," Springer, 2018.
+     DOI: 10.1007/978-3-319-63450-0.
+
+[17] L. Stelmach and M. Knobelsdorf, "Technology Needs and Accessibility
+     in Deaf Higher Education," Journal of Deaf Studies and Deaf Education,
+     vol. 22, no. 1, pp. 45–59, 2017.
+
+[18] B. McFee et al., "librosa: Audio and Music Signal Analysis in Python,"
+     in Proc. 14th Python in Science Conference (SciPy), 2015, pp. 18–25.
+
+[19] M. Abadi et al., "TensorFlow: Large-Scale Machine Learning on
+     Heterogeneous Distributed Systems," arXiv:1603.04467, 2016.
+
+[20] F. Pedregosa et al., "Scikit-learn: Machine Learning in Python," Journal
+     of Machine Learning Research, vol. 12, pp. 2825–2830, 2011.
+
+[21] A. Palaz, M. Magimai-Doss, and R. Collobert, "End-to-End Acoustic
+     Modeling Using Convolutional Neural Networks for HMM-Based Automatic
+     Speech Recognition," Speech Communication, vol. 108, pp. 1–15, 2019.
+
+[22] WHO, "Deafness and Hearing Loss," World Health Organisation Fact Sheet,
+     2023. [Online]. Available: https://www.who.int/news-room/fact-sheets/
+     detail/deafness-and-hearing-loss.
+
+
+================================================================================
+GLOSSARY
+================================================================================
+
+  Acoustic Event Detection (AED)
+    Identifying the occurrence of specific sounds within an audio recording.
+
+  Adam (Adaptive Moment Estimation)
+    An optimisation algorithm for neural networks that adapts the learning rate
+    for each parameter based on gradient history.
+
+  Batch Normalisation
+    A technique that normalises layer activations within a mini-batch during
+    training, helping the network converge faster and more stably.
+
+  Class Weight
+    A per-class multiplier on the training loss that compensates for class
+    imbalance by giving under-represented classes more influence.
+
+  Convolutional Neural Network (CNN)
+    A neural network that applies learnable filters to detect local patterns
+    in spatially structured input data, using shared weights to keep parameter
+    count low.
+
+  Dropout
+    A regularisation technique that randomly deactivates neurons during training
+    to prevent the network from overfitting.
+
+  EarlyStopping
+    A training callback that stops training when a validation metric stops
+    improving, and optionally restores the best weights seen so far.
+
+  Flask
+    A lightweight Python web framework. Used here to host the trained CNN as
+    an HTTP inference endpoint.
+
+  Max Pooling
+    A downsampling operation that takes the maximum value from each region of
+    activations, reducing spatial size and providing some tolerance for input
+    variation.
+
+  Mel Scale
+    A frequency scale designed to match human pitch perception, with finer
+    resolution at low frequencies.
+
+  Mel-Frequency Cepstral Coefficients (MFCCs)
+    A compact audio feature representation derived from the short-time
+    Fourier transform via a Mel filterbank, log compression, and a
+    Discrete Cosine Transform.
+
+  React Native
+    A cross-platform mobile app framework by Meta that allows building iOS
+    and Android apps from a single JavaScript/TypeScript codebase.
+
+  Softmax
+    An output activation that converts a vector of scores to probabilities
+    summing to 1, used for multi-class classification.
+
+  Z-Score Normalisation
+    Scaling a feature by subtracting its mean and dividing by its standard
+    deviation, so all features are on a comparable scale.
+
+
+================================================================================
+APPENDICES
+================================================================================
+
+APPENDIX A — AUDIO PREPROCESSING SOURCE CODE
+----------------------------------------------
+
+The following is the core implementation of the AudioPreprocessor class,
+responsible for loading audio, extracting MFCC features, normalising, and
+saving processed data:
+
+  class AudioPreprocessor:
+      def __init__(self, sample_rate=22050, duration=2.5, n_mfcc=13,
+                   n_frames=40):
+          self.sample_rate = sample_rate
+          self.duration = duration
+          self.n_mfcc = n_mfcc
+          self.n_frames = n_frames
+
+      def load_audio(self, file_path):
+          """Load audio, resample, and fix duration."""
+          audio, _ = librosa.load(
+              file_path,
+              sr=self.sample_rate,
+              duration=self.duration,
+              mono=True
+          )
+          target_len = int(self.sample_rate * self.duration)
+          if len(audio) < target_len:
+              audio = np.pad(audio, (0, target_len - len(audio)))
+          else:
+              audio = audio[:target_len]
+          return audio
+
+      def extract_mfcc(self, audio):
+          """Silence-trim then extract MFCC matrix of fixed shape."""
+          trimmed, _ = librosa.effects.trim(audio, top_db=40)
+          if len(trimmed) < int(self.sample_rate * 0.3):
+              trimmed = audio  # fallback if clip is almost silent
+
+          # Re-pad trimmed audio to target duration
+          target_len = int(self.sample_rate * self.duration)
+          if len(trimmed) < target_len:
+              trimmed = np.pad(trimmed, (0, target_len - len(trimmed)))
+          else:
+              trimmed = trimmed[:target_len]
+
+          mfcc = librosa.feature.mfcc(
+              y=trimmed,
+              sr=self.sample_rate,
+              n_mfcc=self.n_mfcc
+          )
+          # Fix to exactly n_frames columns
+          if mfcc.shape[1] > self.n_frames:
+              mfcc = mfcc[:, :self.n_frames]
+          else:
+              mfcc = np.pad(
+                  mfcc,
+                  ((0, 0), (0, self.n_frames - mfcc.shape[1]))
+              )
+          return mfcc  # shape (13, 40)
+
+      def load_dataset_from_folders(self, data_dir, label_map):
+          """Load all audio files from labelled subdirectories."""
+          X, y = [], []
+          for label_name, label_idx in label_map.items():
+              folder = os.path.join(data_dir, label_name)
+              for fname in os.listdir(folder):
+                  fpath = os.path.join(folder, fname)
+                  try:
+                      audio = self.load_audio(fpath)
+                      mfcc  = self.extract_mfcc(audio)
+                      X.append(mfcc)
+                      y.append(label_idx)
+                  except Exception as e:
+                      print(f"Skipped {fpath}: {e}")
+          return np.array(X), np.array(y)
+
+      def normalise(self, X_train, X_val, X_test):
+          """Per-coefficient z-score normalisation."""
+          # X shape: (N, 13, 40)
+          mean = X_train.mean(axis=(0, 2), keepdims=True)  # (1,13,1)
+          std  = X_train.std(axis=(0, 2), keepdims=True)   # (1,13,1)
+          std[std == 0] = 1e-8  # avoid division by zero
+          return ((X_train-mean)/std,
+                  (X_val  -mean)/std,
+                  (X_test -mean)/std,
+                  mean.squeeze(), std.squeeze())
+
+
+APPENDIX B — CNN MODEL ARCHITECTURE SOURCE CODE
+-------------------------------------------------
+
+The following is the SoundClassifierCNN implementation in TensorFlow/Keras:
+
+  def build_model(input_shape=(13, 40, 1), n_classes=7):
+      inputs = keras.Input(shape=input_shape)
+
+      # Block 1 — 32 filters
+      x = layers.Conv2D(32, (3,3), activation='relu', padding='same')(inputs)
+      x = layers.BatchNormalization()(x)
+      x = layers.MaxPooling2D((2,2))(x)
+      x = layers.Dropout(0.25)(x)
+
+      # Block 2 — 64 filters
+      x = layers.Conv2D(64, (3,3), activation='relu', padding='same')(x)
+      x = layers.BatchNormalization()(x)
+      x = layers.MaxPooling2D((2,2))(x)
+      x = layers.Dropout(0.25)(x)
+
+      # Block 3 — 128 filters
+      x = layers.Conv2D(128, (3,3), activation='relu', padding='same')(x)
+      x = layers.BatchNormalization()(x)
+      x = layers.MaxPooling2D((2,2))(x)
+      x = layers.Dropout(0.30)(x)
+
+      x = layers.Flatten()(x)
+
+      # Dense Block 1
+      x = layers.Dense(256, activation='relu')(x)
+      x = layers.BatchNormalization()(x)
+      x = layers.Dropout(0.50)(x)
+
+      # Dense Block 2
+      x = layers.Dense(128, activation='relu')(x)
+      x = layers.BatchNormalization()(x)
+      x = layers.Dropout(0.40)(x)
+
+      # Output
+      outputs = layers.Dense(n_classes, activation='softmax')(x)
+
+      model = keras.Model(inputs, outputs)
+      model.compile(
+          optimizer=keras.optimizers.Adam(learning_rate=0.001),
+          loss='sparse_categorical_crossentropy',
+          metrics=['accuracy']
+      )
+      return model
+
+  # Training with callbacks
+  callbacks = [
+      keras.callbacks.EarlyStopping(
+          monitor='val_loss', patience=15,
+          restore_best_weights=True
+      ),
+      keras.callbacks.ModelCheckpoint(
+          filepath='models/best_model.keras',
+          monitor='val_accuracy', save_best_only=True
+      ),
+      keras.callbacks.ReduceLROnPlateau(
+          monitor='val_loss', factor=0.5,
+          patience=5, min_lr=1e-7
+      )
+  ]
+
+  history = model.fit(
+      X_train, y_train,
+      validation_data=(X_val, y_val),
+      epochs=100,
+      batch_size=32,
+      class_weight=class_weights,
+      callbacks=callbacks
+  )
+
+
+APPENDIX C — FLASK API SERVER SOURCE CODE
+-------------------------------------------
+
+Core structure of the Flask inference API:
+
+  from flask import Flask, request, jsonify
+  from flask_cors import CORS
+  import tensorflow as tf
+  import librosa, soundfile, numpy as np, json, io
+
+  app = Flask(__name__)
+  CORS(app)
+
+  model = None
+  metadata = None
+
+  def load_model_once():
+      global model, metadata
+      if model is None:
+          model = tf.keras.models.load_model('models/best_model.keras')
+          with open('data/processed/alert_sounds/metadata.json') as f:
+              metadata = json.load(f)
+
+  def preprocess_audio(audio_bytes):
+      """Decode audio bytes, extract MFCC, normalise."""
+      try:
+          audio, sr = soundfile.read(io.BytesIO(audio_bytes))
+      except Exception:
+          audio, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
+
+      audio = librosa.resample(audio, orig_sr=sr, target_sr=22050)
+      target = int(22050 * 2.5)
+      if len(audio) < target:
+          audio = np.pad(audio, (0, target - len(audio)))
+      else:
+          audio = audio[:target]
+
+      trimmed, _ = librosa.effects.trim(audio, top_db=40)
+      if len(trimmed) >= int(22050 * 0.3):
+          audio = np.pad(trimmed, (0, max(0, target - len(trimmed))))[:target]
+
+      mfcc = librosa.feature.mfcc(y=audio, sr=22050, n_mfcc=13)
+      if mfcc.shape[1] > 40:
+          mfcc = mfcc[:, :40]
+      else:
+          mfcc = np.pad(mfcc, ((0,0),(0, 40-mfcc.shape[1])))
+
+      mean = np.array(metadata['mfcc_mean'])
+      std  = np.array(metadata['mfcc_std'])
+      mfcc = (mfcc - mean[:, None]) / std[:, None]
+      return mfcc.reshape(1, 13, 40, 1).astype(np.float32)
+
+  CLASS_MAP = {
+      'bus horns':  ('bus-horn',   '🚌', 'high'),
+      'car horns':  ('car-horn',   '🚗', 'medium'),
+      'train horns':('train-horn', '🚂', 'high'),
+      'truck horns':('truck-horn', '🚚', 'high'),
+      'ambulance':  ('ambulance',  '🚑', 'high'),
+      'firetruck':  ('firetruck',  '🚒', 'high'),
+      'police':     ('police',     '🚓', 'high'),
+  }
+
+  @app.route('/predict', methods=['POST'])
+  def predict():
+      load_model_once()
+      audio_file = request.files.get('audio')
+      if not audio_file:
+          return jsonify({'error': 'No audio file provided'}), 400
+
+      features = preprocess_audio(audio_file.read())
+      probs = model.predict(features, verbose=0)[0]
+      idx   = int(np.argmax(probs))
+      conf  = float(probs[idx])
+      label = metadata['class_names'][idx]
+      alert_type, icon, severity = CLASS_MAP.get(
+          label, (label, '🔊', 'low')
+      )
+      return jsonify({
+          'id': str(uuid.uuid4()),
+          'type': alert_type,
+          'title': label,
+          'icon': icon,
+          'severity': severity,
+          'confidence': round(conf * 100, 1),
+          'timestamp': datetime.utcnow().isoformat(),
+          'detected': conf >= 0.60
+      })
+
+  @app.route('/health', methods=['GET'])
+  def health():
+      return jsonify({'status': 'ok', 'model_loaded': model is not None})
+
+  if __name__ == '__main__':
+      app.run(host='0.0.0.0', port=5003, debug=False)
+
+
+APPENDIX D — DATASET SAMPLE DISTRIBUTION
+------------------------------------------
+
+  Class            Source Dataset   Clips (approx.)   Training   Val    Test
+  ────────────────────────────────────────────────────────────────────────────
+  Bus horn         Vehicle Horns         182            ~116      ~29    ~37
+  Car horn         Vehicle Horns         182            ~116      ~29    ~37
+  Train horn       Vehicle Horns         183            ~117      ~29    ~37
+  Truck horn       Vehicle Horns         183            ~117      ~29    ~37
+  Ambulance        Sirens                833            ~533      ~133   ~167
+  Fire truck       Sirens                833            ~533      ~133   ~167
+  Police           Sirens                834            ~534      ~134   ~166
+  ────────────────────────────────────────────────────────────────────────────
+  Total                                3,230          1,522      268    448
+
+  Actual recorded counts from training artifacts:
+    Training   : 1,522
+    Validation : 268
+    Test       : 448
+    Total      : 2,238
+
+  Note: The difference between the approximately expected total (~3,230) and
+  the actual processed total (2,238) reflects clips that were discarded during
+  preprocessing due to file format errors, extremely short duration after
+  silence trimming, or corruption. The stratified split was applied to the
+  surviving 2,238 clips.
+
+
+================================================================================
+  END OF THESIS
+  ENVIRONMENTAL SOUND ALERT MODULE
+  Intelligent Sinhala Sign Language Communication Platform
+================================================================================

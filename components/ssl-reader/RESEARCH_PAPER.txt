@@ -1,0 +1,669 @@
+================================================================================
+
+    MULTI-STREAM FUSION MODEL FOR REAL-TIME SINHALA SIGN LANGUAGE
+    RECOGNITION USING HAND GESTURES, FACIAL EXPRESSIONS, AND
+    BODY POSTURE
+
+    Developer : IT22304674 — Liyanage M.L.I.S.
+    Component : SSL Reader Module
+    Project   : Intelligent Sinhala Sign Language Communication Platform
+
+================================================================================
+
+
+ABSTRACT
+--------
+Sign language recognition systems that rely solely on hand gestures fail to
+capture the full communicative intent of the signer, because sign languages
+also encode meaning through facial expressions and body posture. This paper
+presents a real-time Sinhala Sign Language (SSL) recognition system that
+simultaneously analyses three modalities — hand gestures, facial expressions,
+and body posture — through a purpose-built Multi-Stream Fusion Model. The
+system uses Google MediaPipe to extract 457-dimensional skeletal features per
+video frame, covering 42 hand landmarks, 60 key facial landmarks with 52
+blendshape expression scores, and 33 body pose landmarks. Each modality is
+processed by a dedicated sub-network: Temporal Convolutional Networks (TCNs)
+for hands and face, and a Bidirectional LSTM for body posture. An attention-
+based fusion module dynamically learns the relative importance of each stream
+per sign and combines them into a unified prediction. Four architectures were
+systematically explored — Multimodal LSTM (~47% val acc), Multimodal
+Transformer (~41%), Hybrid LSTM-Transformer (~52%), and the final Multi-Stream
+Fusion Model (76.3% val acc, 80.1% test acc on 383 classes). The model was
+trained on 8,472 videos across 383 Sinhala sign vocabulary items under severe
+data scarcity (~22 videos per class), addressed through skeleton-level
+augmentation, label smoothing, and aggressive regularisation. The system
+performs real-time inference from a live camera feed and is deployed through a
+Flask REST API for integration with a React Native mobile application, forming
+one component of a broader platform aimed at improving communication
+accessibility for the deaf community in Sri Lanka.
+
+
+1. INTRODUCTION
+---------------
+
+1.1 Background
+Sign language is the primary mode of communication for deaf and hearing-
+impaired communities. In Sri Lanka, Sinhala Sign Language (SSL) is used by an
+estimated 200,000 deaf individuals. However, the overwhelming majority of the
+hearing population does not know SSL, creating a persistent communication
+barrier in everyday life — in hospitals, classrooms, workplaces, government
+offices, and on the street.
+
+Human interpreters are scarce and expensive, and are unavailable for spontaneous
+everyday interactions. An automated system that can observe a person performing
+SSL through a standard camera and produce the corresponding text in real time
+would significantly reduce this barrier, enabling deaf individuals to
+communicate independently with any hearing person who has access to a
+smartphone.
+
+1.2 Problem Statement
+Existing sign language recognition systems overwhelmingly focus on hand gesture
+classification alone. While the hands are the primary articulators in sign
+language, they are not the only carriers of meaning. In SSL and most sign
+languages worldwide, facial expression and body posture serve critical
+linguistic functions:
+
+  - Facial expressions distinguish grammatical constructions (questions versus
+    statements often differ only in eyebrow position), convey emotional tone,
+    and in some signs are themselves part of the sign's definition.
+  - Body posture provides context such as emphasis (leaning forward) or
+    referential direction (body orientation indicating the subject or object
+    of a sentence).
+
+A hand-only system misses these signals and is therefore limited in accuracy
+and communicative completeness. A system that integrates all three modalities
+— hands, face, and body — mirrors how human interpreters read sign language
+and should achieve higher recognition accuracy.
+
+1.3 Objectives
+This work addresses the following objectives:
+
+  (1)  Design a feature extraction pipeline that captures hand gestures, facial
+       expressions (including expression intensity through blendshape scores),
+       and body posture from video input using state-of-the-art pose estimation.
+
+  (2)  Develop a multi-stream neural network architecture where each modality
+       is processed by a specialised sub-network matched to its temporal
+       dynamics, with attention-based fusion that learns the relative
+       contribution of each modality per sign.
+
+  (3)  Address the practical challenge of severe data scarcity (~22 training
+       videos per class across 383 classes) through targeted augmentation and
+       regularisation strategies.
+
+  (4)  Deploy the trained model as a real-time inference system accessible to
+       a mobile application.
+
+1.4 Paper Organisation
+Section 2 reviews related work. Section 3 describes data collection and
+dataset statistics. Section 4 details the feature extraction and normalisation
+methodology. Section 5 presents the data augmentation strategy. Section 6
+describes the progression of model architectures. Section 7 details the final
+Multi-Stream Fusion Model. Section 8 describes the training procedure.
+Section 9 presents evaluation results. Section 10 describes the deployment
+pipeline. Section 11 discusses limitations and future work. Section 12
+concludes.
+
+
+2. RELATED WORK
+---------------
+
+2.1 Hand-Only Sign Language Recognition
+Most published sign language recognition systems treat the problem as hand
+gesture classification. Early work used hand-crafted features such as HOG
+descriptors and histogram-based skin detection, fed into classifiers such as
+SVMs or Hidden Markov Models (HMMs) [1]. Deep learning approaches improved
+accuracy substantially: CNNs for static fingerspelling [2], LSTMs for
+temporal gesture sequences [3], and Transformer architectures for capturing
+long-range dependencies in continuous signing [4].
+
+However, these approaches capture only one dimension of sign language. They
+may achieve high accuracy on constrained datasets of isolated hand gestures but
+struggle with naturalistic signing where meaning depends on simultaneous
+signals across the body.
+
+2.2 Multi-Modal Sign Language Recognition
+A growing body of work has explored multi-modal approaches. Koller et al. [5]
+combined CNN-based hand features with mouth shape features for German Sign
+Language, showing that lip movements improved recognition of mouth-action
+signs. Camgoz et al. [6] explored joint modelling of hand shape, hand motion,
+and mouth pattern for continuous SLR. More recently, Jiang et al. [7]
+demonstrated that skeleton-based multi-stream architectures (hands + body)
+outperformed single-stream baselines on Chinese Sign Language.
+
+These works validate the importance of multi-modal features but typically
+focus on two modalities (hands + mouth, or hands + body). This work extends
+the approach to three full modalities — hands, face, and body — and introduces
+an attention fusion mechanism that provides interpretable stream-level
+importance weights.
+
+2.3 MediaPipe for Pose Estimation
+Google MediaPipe [8] provides real-time, on-device pose estimation models for
+hands (21 landmarks per hand), face (468 landmarks + 52 blendshapes), and
+body pose (33 landmarks). MediaPipe has been widely adopted for sign language
+recognition research due to its accuracy, speed, and cross-platform
+availability. This work uses the MediaPipe Tasks API (v0.10.21) as the
+feature extraction backbone.
+
+2.4 Sign Language Recognition in Sri Lanka
+Research on SSL recognition is sparse. Existing work has been limited to small
+vocabulary sizes (typically 10–50 signs) and hand-only approaches using
+conventional machine learning [9]. No published system integrates facial
+expression analysis or body posture for SSL, and none addresses a vocabulary
+as large as 383 signs. This work represents a significant scale-up for SSL
+recognition research.
+
+2.5 Temporal Convolutional Networks
+TCNs [10] use causal dilated convolutions to capture temporal patterns at
+multiple scales efficiently. Compared to RNNs, TCNs offer parallelisable
+training, stable gradients, and flexible receptive field control through
+dilation. They have shown competitive or superior performance to LSTMs on
+sequence-modelling tasks including action recognition and speech processing.
+
+
+3. DATASET
+----------
+
+3.1 Source
+The dataset used is the signVideo dataset, a locally collected video corpus of
+Sinhala Sign Language. Each sign class is stored as a directory containing
+multiple MP4 video recordings of a signer performing the corresponding sign.
+Videos vary in frame rate and resolution but depict a single signer against
+a relatively uniform background.
+
+3.2 Vocabulary and Statistics
+  Total classes          : 383 Sinhala sign vocabulary items
+  Total videos           : 8,472
+  Average per class      : approximately 22 videos
+  Minimum per class      : varies (some classes have as few as 15 videos)
+
+The 383 classes span a broad communicative vocabulary:
+  - Greetings and social phrases (e.g., hello, thank you, goodbye)
+  - People and relationships (e.g., mother, father, teacher, friend)
+  - Numbers (cardinal and ordinal)
+  - Days of the week and months of the year
+  - Colours and descriptive adjectives
+  - Common nouns (objects, places, animals)
+  - Verbs and actions (e.g., eat, go, walk, help)
+  - Prepositions, conjunctions, determiners
+  - Adverbs and interjections
+
+This coverage enables the system to interpret a broad range of conversational
+utterances.
+
+3.3 Dataset Split
+A stratified split ensured proportional class representation:
+  Training   : 5,827 videos (68.8%)
+  Validation : 1,358 videos (16.0%)
+  Test       : 1,287 videos (15.2%)
+
+Label mappings were stored in a centralised label_mapping.json file mapping
+each Sinhala sign name to a zero-based integer index.
+
+3.4 Data Scarcity
+With approximately 22 videos per class, the dataset is severely under-resourced
+by deep learning standards. This poses a critical risk: the model has strong
+incentive to memorise training samples rather than learning generalisable
+representations. Addressing this challenge was a central design concern
+(Sections 5 and 8).
+
+
+4. FEATURE EXTRACTION AND NORMALISATION
+-----------------------------------------
+
+4.1 MediaPipe Feature Extraction
+Three pre-trained MediaPipe task models were deployed:
+  - Hand Landmarker     (float16, GPU delegate)
+  - Face Landmarker     (float16, GPU delegate, blendshapes enabled)
+  - Pose Landmarker     (full model, float16)
+
+Each video was decoded frame-by-frame using OpenCV, converted from BGR to RGB,
+and passed to the three detectors. A fixed temporal window of 60 frames was
+used: shorter videos were zero-padded; longer videos were uniformly subsampled.
+
+4.2 Three Feature Streams
+Three distinct feature streams were extracted per frame:
+
+  (a) Hand Stream — 126 dimensions
+      Both hands tracked simultaneously. Each hand provides 21 landmarks with
+      (x, y, z) normalised coordinates: 21 × 3 = 63 per hand, 126 total.
+      Undetected hands were represented as zero vectors. Detection thresholds
+      were set to 0.3 for robust tracking of fast-moving and partially
+      occluded hands.
+
+  (b) Face Stream — 232 dimensions
+      From MediaPipe's full 468 face landmarks, 60 key landmarks were selected
+      based on their linguistic and emotional relevance:
+        - 12 eye landmarks (gaze direction, eye openness)
+        - 10 eyebrow landmarks (raised, furrowed expressions)
+        - 14 mouth landmarks (lip shape, speech-related movements)
+        - 4 nose landmarks (spatial reference point)
+        - 20 face oval landmarks (structural context)
+      These 60 landmarks provide 60 × 3 = 180 spatial dimensions. Additionally,
+      52 MediaPipe face blendshape scores were included. Blendshapes are
+      scalar values (0–1) representing muscle-group-level expression
+      coefficients such as jaw_open, brow_inner_up, cheek_puff, and
+      mouth_smile_left. They capture expression intensity information that
+      spatial landmark positions alone cannot fully represent. Total face
+      features: 180 + 52 = 232 dimensions.
+
+  (c) Pose Stream — 99 dimensions
+      All 33 MediaPipe body landmarks extracted as (x, y, z) coordinates:
+      33 × 3 = 99 dimensions. These capture shoulder orientation, torso
+      lean, arm elevation, and upper-body posture.
+
+4.3 Combined Feature Vector
+The three streams were concatenated in fixed order per frame:
+  [hands | face | pose] = [126 | 232 | 99] = 457 dimensions
+Each video was represented as a tensor of shape (60 × 457).
+
+4.4 Root-Relative Coordinate Normalisation
+Raw MediaPipe coordinates (0–1 normalised to image frame) are sensitive to
+the signer's position and distance from the camera. To achieve position
+invariance, root-relative normalisation was applied:
+
+  - Hands:  Each hand's 21 landmarks centred on the wrist (landmark 0).
+  - Face:   60 landmarks centred on the nose tip (landmark 36 in the
+            filtered set). Blendshape scores (scalars) were unmodified.
+  - Pose:   33 landmarks centred on the mid-shoulder point (average of
+            landmarks 11 and 12).
+
+Undetected body parts (all-zero blocks) remained zero after centring. This
+normalisation was applied identically in training and inference pipelines.
+
+
+5. DATA AUGMENTATION
+---------------------
+Skeleton-level augmentation was applied during training to combat data scarcity.
+Augmentation operated on raw coordinates before normalisation to preserve
+geometric consistency. A stream-specific strategy applied targeted
+perturbations appropriate to each modality's content.
+
+Seven stochastic operations were used (global application probability 0.7):
+
+  Operation          Parameters                   Purpose
+  ------------------ ---------------------------- ----------------------------------
+  Spatial rotation   ±5° on (x,y) pairs           Camera angle variation
+  Spatial scaling    factor ∈ [0.9, 1.1]           Distance variation
+  Gaussian noise     σ = 0.002                     Sensor noise robustness
+  Temporal shift     ±10% frames, p=0.3            Signing onset variation
+  Time warping       speed ∈ [0.8, 1.2], p=0.25   Signing rate variation
+  Frame dropping     up to 20%, p=0.2              Occlusion simulation
+  Time masking       contiguous block, p=0.15      Brief invisibility
+
+Horizontal flipping was deliberately excluded because in sign language, left-
+right handedness carries semantic meaning; mirroring a sign can change its
+meaning. Augmentation was disabled for validation and test sets.
+
+
+6. MODEL ARCHITECTURE EXPLORATION
+-----------------------------------
+Four architectures were systematically evaluated, with each iteration
+addressing limitations observed in its predecessor.
+
+  Architecture                      Params    Val Acc    Limitation
+  --------------------------------- --------- --------- ---------------------------
+  Model 1: Multimodal BiLSTM        ~3.1M     ~47%      Single stream conflates
+            (2-layer, hidden=256,                        heterogeneous features
+             attention pooling)
+
+  Model 2: Multimodal Transformer   ~4.7M     ~41%      Data-hungry; no benefit
+            (4 layers, d=256,                            over LSTM at this scale
+             8 heads, GELU)
+
+  Model 3: Hybrid LSTM+Transformer  ~5.2M     ~52%      Still single stream;
+            (BiLSTM → 2-layer                            cannot specialise per
+             Transformer)                                modality
+
+  Model 4: Multi-Stream Fusion      ~2.52M    76.3%     FINAL — separate streams
+            (TCN + BiLSTM + Attn)                        resolve conflation
+
+Key finding: all three single-stream architectures (Models 1–3) suffered from
+conflating hand dynamics, facial expression changes, and body posture shifts
+into one undifferentiated input. Despite increasing architectural complexity,
+they plateaued at ~52% because the network could not learn modality-specific
+temporal patterns. Separating the streams (Model 4) produced a 24-point
+improvement while using fewer parameters.
+
+
+7. FINAL MODEL — MULTI-STREAM FUSION MODEL
+--------------------------------------------
+
+7.1 Design Rationale
+The three modalities have fundamentally different temporal dynamics:
+  - Hands: rapid, high-frequency movements (sub-second transitions)
+  - Face: moderate-speed, continuous expression changes
+  - Body: slow, contextual posture shifts over the full sign duration
+
+Routing each modality through a dedicated sub-network allows the architecture
+to match each signal's characteristics. The TCN was chosen for hands and face
+because dilated convolutions efficiently capture multi-scale temporal patterns.
+The BiLSTM was chosen for body posture because its sequential gating mechanism
+maintains long-range context for slow-changing signals.
+
+7.2 Architecture
+
+  Input: (batch, 60 frames, 457 features)
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │                                                                      │
+  │  Hand Stream (dims 0–125)    Face Stream (dims 126–357)              │
+  │  ┌──────────────────────┐    ┌──────────────────────────┐            │
+  │  │ TCN Block 1:         │    │ TCN Block 1:             │            │
+  │  │   Conv1D 126→64      │    │   Conv1D 232→128         │            │
+  │  │   dilation=1, k=5    │    │   dilation=1, k=5        │            │
+  │  │   BN + ReLU + Drop   │    │   BN + ReLU + Drop       │            │
+  │  │   Residual (1×1 conv)│    │   Residual (1×1 conv)    │            │
+  │  ├──────────────────────┤    ├──────────────────────────┤            │
+  │  │ TCN Block 2:         │    │ TCN Block 2:             │            │
+  │  │   Conv1D 64→128      │    │   Conv1D 128→256         │            │
+  │  │   dilation=2, k=5    │    │   dilation=2, k=5        │            │
+  │  ├──────────────────────┤    ├──────────────────────────┤            │
+  │  │ TCN Block 3:         │    │ TCN Block 3:             │            │
+  │  │   Conv1D 128→128     │    │   Conv1D 256→256         │            │
+  │  │   dilation=4, k=5    │    │   dilation=4, k=5        │            │
+  │  ├──────────────────────┤    ├──────────────────────────┤            │
+  │  │ Global Avg Pool      │    │ Global Avg Pool          │            │
+  │  └────────┬─────────────┘    └────────┬─────────────────┘            │
+  │           │ (128-d)                   │ (256-d)                      │
+  │           │                           │                              │
+  │  Pose Stream (dims 358–456)           │                              │
+  │  ┌──────────────────────┐             │                              │
+  │  │ BiLSTM               │             │                              │
+  │  │   input=99, h=32×2   │             │                              │
+  │  │   1 layer, bidir     │             │                              │
+  │  │ Adaptive Avg Pool    │             │                              │
+  │  └────────┬─────────────┘             │                              │
+  │           │ (64-d)                    │                              │
+  │           │                           │                              │
+  │  ┌────────┴───────────────────────────┴──────────────────────────┐   │
+  │  │                  ATTENTION FUSION                              │   │
+  │  │  Project each stream → 512-d                                  │   │
+  │  │  Score: Linear(512→256) → Tanh → Linear(256→1) per stream     │   │
+  │  │  Softmax over 3 scores → weights (w_hand, w_face, w_pose)     │   │
+  │  │  Fused = w_hand·hand + w_face·face + w_pose·pose              │   │
+  │  │  LayerNorm → Dropout(0.3) →  512-d fused vector               │   │
+  │  └──────────────────────────┬────────────────────────────────────┘   │
+  │                             │                                        │
+  │  ┌──────────────────────────┴────────────────────────────────────┐   │
+  │  │                     CLASSIFIER                                │   │
+  │  │  Linear(512→256) → ReLU → Dropout(0.3) → Linear(256→383)     │   │
+  │  └───────────────────────────────────────────────────────────────┘   │
+  │                                                                      │
+  │  Output: logits (batch, 383)  +  attention_weights (batch, 3)        │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  Total trainable parameters: ~2.52 million
+
+7.3 Stream Details
+
+  Hand TCN Stream
+  Three TCN blocks with exponentially increasing dilation (1, 2, 4) and
+  kernel size 5. Each block contains two 1D convolutions with BatchNorm,
+  ReLU, and dropout (0.3), plus a residual skip connection (1×1 convolution
+  when dimensions change). Channel progression: 126 → 64 → 128 → 128.
+  Global average pooling over the time axis produces a 128-d vector
+  representing the full hand motion trajectory.
+
+  Face TCN Stream
+  Same architecture with wider channels to match the richer face input:
+  232 → 128 → 256 → 256. Produces a 256-d vector capturing expression
+  dynamics across the sign.
+
+  Pose BiLSTM Stream
+  A single-layer bidirectional LSTM (hidden size 32 per direction, 64 total).
+  Adaptive average pooling over the output sequence produces a 64-d vector
+  representing body posture context.
+
+7.4 Attention Fusion
+Each stream's output is projected to a common 512-d space. A shared two-layer
+attention network computes a scalar score per stream; softmax normalisation
+produces three weights summing to 1. The fused vector is the weighted sum
+followed by LayerNorm and Dropout.
+
+The attention weights provide interpretability: they reveal whether the model
+relies more on hands, face, or body for each individual sign, providing
+insight into the model's decision process.
+
+
+8. TRAINING PROCEDURE
+-----------------------
+
+  Parameter                  Value
+  -------------------------- -----------------------------------
+  Loss function              Cross-entropy + label smoothing (ε=0.1)
+  Optimiser                  Adam (lr=1×10⁻³, weight decay=1×10⁻⁴)
+  LR schedule                CosineAnnealingWarmRestarts
+                             (T₀=30, T_mult=2, η_min=1×10⁻⁶)
+  Batch size                 16
+  Max epochs                 120
+  Early stopping patience    20 epochs (monitor: val accuracy)
+  Dropout                    0.3 (all sub-networks + classifier)
+  Augmentation               Skeleton-level, 7 ops, p=0.7
+  Hardware                   NVIDIA GeForce MX350
+  Framework                  PyTorch 2.7.1 + CUDA 11.8
+
+Label smoothing was used because the extreme data scarcity (~22 samples per
+class) makes the model prone to overconfident predictions on memorised
+training data. By distributing ε = 0.1 of the probability mass across
+non-target classes, the training signal encourages broader generalisation.
+
+Cosine Annealing with Warm Restarts was chosen over ReduceLROnPlateau because
+the periodic resetting of the learning rate enables the optimiser to escape
+local minima that plateau-based schedulers cannot, while the progressively
+longer cycles (30 → 60 → 120 epochs) give the model more time to refine in
+later stages.
+
+
+9. EVALUATION RESULTS
+-----------------------
+
+9.1 Final Model Performance
+
+  Metric                         Value
+  ------------------------------ ------
+  Test accuracy                  80.1%
+  Validation accuracy (best)     76.3%
+  Best checkpoint epoch          87
+  Classes                        383
+  Training videos                5,827
+  Test videos                    1,287
+  Model parameters               ~2.52M
+
+9.2 Architecture Comparison
+
+  Architecture                       Val Acc   Test Acc   Params
+  ---------------------------------- --------- --------- --------
+  Multimodal BiLSTM                  ~47%      —         ~3.1M
+  Multimodal Transformer             ~41%      —         ~4.7M
+  Hybrid LSTM + Transformer          ~52%      —         ~5.2M
+  Multi-Stream Fusion (final)        76.3%     80.1%     ~2.52M
+
+The multi-stream approach improved validation accuracy by approximately 24
+percentage points over the best single-stream baseline (Hybrid, ~52%) while
+using fewer parameters (2.52M vs 5.2M). This demonstrates that architectural
+design — specifically, modality-specific processing before fusion — is more
+effective than simply increasing model size when the training data is limited.
+
+9.3 Impact of Multi-Modal Features
+The progression from Model 1 to Model 4 isolates the contribution of the
+multi-stream design. Models 1–3 all received the same 457-dimensional input
+containing all three modalities but processed them as a single concatenated
+stream. Their accuracy plateaued around 47–52%. Model 4 received identical
+input but split it into three dedicated streams with targeted architectures.
+The 24-point improvement confirms that the feature separation — not the
+features themselves — is the critical factor, validating the hypothesis that
+hand dynamics, facial expressions, and body posture require modality-specific
+temporal modelling.
+
+9.4 Discussion of Test vs Validation Gap
+The test accuracy (80.1%) exceeds validation accuracy (76.3%) by 3.8 points.
+This is consistent with natural variance at this dataset scale (~1,287 test
+and ~1,358 validation samples) and does not indicate data leakage or
+overfitting to the test set: the best checkpoint was selected exclusively
+based on validation performance, and the test set was evaluated only once.
+
+
+10. SYSTEM DEPLOYMENT
+-----------------------
+
+10.1 Real-Time Inference Pipeline
+The trained model is deployed for real-time sign recognition through the
+following pipeline:
+
+  1. Camera captures frames at native frame rate using OpenCV VideoCapture.
+  2. Each frame is passed through MediaPipe hand, face, and pose detectors.
+  3. The extracted 457-dimensional feature vector is root-relative normalised
+     using the same procedure applied during training.
+  4. Features are accumulated in a rolling 60-frame buffer.
+  5. When the buffer is full, the model performs a single forward pass.
+  6. The predicted sign (Sinhala text) and confidence score are displayed
+     on-screen using Pillow (PIL) with the Nirmala UI font, since OpenCV
+     does not support Sinhala Unicode rendering.
+
+10.2 Backend API
+A Flask REST API (react_native_bridge.py, port 5000) exposes the inference
+pipeline over HTTP. The React Native mobile application sends camera frame
+data to the server and receives the predicted sign, enabling server-side
+inference without requiring the deep learning model to run on the mobile
+device.
+
+Key API endpoints:
+  POST /predict-sign       : Single-frame prediction
+  POST /predict-video-sign : Multi-frame video prediction
+  POST /clear-video-buffer : Reset the rolling buffer
+  GET  /all-labels         : Retrieve all available sign labels
+
+10.3 Sinhala Unicode Rendering
+A specific technical challenge was rendering Sinhala script on the inference
+display. OpenCV's putText function only supports ASCII characters. This was
+solved by converting the OpenCV frame (BGR) to a PIL Image, using PIL's text
+rendering with the Nirmala UI font (Nirmala.ttc — a Unicode-capable system
+font), and converting back to OpenCV format. This approach supports the full
+Sinhala Unicode range without external font dependencies.
+
+
+11. LIMITATIONS AND FUTURE WORK
+---------------------------------
+
+11.1 Dataset Limitations
+  - Single signer: The dataset is recorded with a limited number of signers.
+    Models trained on single-signer data may not generalise well to signers
+    with different physical characteristics, signing styles, or speeds.
+    Multi-signer training data would improve robustness.
+  - Data scarcity: ~22 videos per class is far below the thousands of examples
+    per-class typical in state-of-the-art recognition systems. Transfer
+    learning from large-scale sign language datasets in other languages could
+    partially address this.
+  - Vocabulary coverage: 383 classes cover a useful conversational subset but
+    not the full SSL vocabulary. Expanding the vocabulary would require
+    additional data collection.
+
+11.2 Model Limitations
+  - Isolated sign recognition: The current system recognises individual
+    signs rather than continuous signing sequences. Connectionist Temporal
+    Classification (CTC) or encoder-decoder architectures would be needed
+    for continuous recognition.
+  - 60-frame fixed window: Signs that span more or fewer than 60 frames may
+    lose information through truncation or zero-padding. Dynamic sequence
+    length handling would improve flexibility.
+  - No language model: Predictions are made independently per sign without
+    consideration of linguistic context. Integrating a language model could
+    improve accuracy by resolving ambiguities using the probability of sign
+    sequences in SSL grammar.
+
+11.3 Deployment Limitations
+  - Server dependency: The current deployment requires a server running the
+    Flask API. Converting the PyTorch model to ONNX or TFLite for on-device
+    inference would eliminate the server requirement and reduce latency.
+  - Latency: The rolling 60-frame buffer introduces an inherent latency equal
+    to the time required to capture 60 frames. At 30 fps, this is 2 seconds.
+    A sliding window with overlapping predictions would provide earlier
+    preliminary results.
+
+11.4 Future Work
+  - Continuous sign language recognition using CTC or sequence-to-sequence
+    models.
+  - Multi-signer training with data from diverse signers.
+  - On-device deployment via PyTorch Mobile or TFLite conversion.
+  - Transfer learning from larger sign language datasets (e.g., WLASL, MSASL)
+    to address data scarcity.
+  - Language model integration for sequence-level disambiguation.
+  - Achieving 80%+ validation accuracy through expanded multi-signer
+    training data, transfer learning from larger sign language corpora
+    (e.g., WLASL, MSASL), and hyperparameter optimisation — the current
+    76.3% validation accuracy demonstrates the viability of the multi-stream
+    approach, and surpassing the 80% threshold is an attainable near-term
+    goal with additional data and fine-tuning.
+  - User studies with the deaf community to evaluate real-world usability.
+
+
+12. CONCLUSION
+--------------
+This paper presented a multi-stream fusion approach to Sinhala Sign Language
+recognition that simultaneously analyses hand gestures, facial expressions,
+and body posture to produce more accurate recognition than hand-only systems.
+
+The key contribution is the Multi-Stream Fusion Model, which routes each
+modality through a dedicated temporal sub-network — TCNs for the rapid
+dynamics of hand and face, BiLSTM for the slow context of body posture — and
+combines them through an attention-based fusion mechanism that dynamically
+learns each modality's importance per sign.
+
+Systematic evaluation across four architectures demonstrated that modality-
+specific processing before fusion is critical: the multi-stream design achieved
+76.3% validation accuracy and 80.1% test accuracy on 383 sign classes,
+improving over the best single-stream architecture by 24 percentage points
+while using fewer parameters. This was accomplished under severe data scarcity
+(~22 videos per class) using targeted skeleton-level augmentation, label
+smoothing, and aggressive regularisation.
+
+The system operates in real time from a live camera feed and is deployed as a
+Flask REST API for integration with a React Native mobile application. As part
+of the Intelligent Sinhala Sign Language Communication Platform, it
+complements text-to-sign generation, environmental sound alerts, and adaptive
+learning modules to provide comprehensive communication and safety tools for
+the deaf community in Sri Lanka.
+
+
+REFERENCES
+----------
+[1]   S. K. Liddell and R. E. Johnson, "American Sign Language: The
+      Phonological Base," Sign Lang. Studies, 1989.
+
+[2]   N. C. Camgoz, S. Hadfield, O. Koller, H. Ney, and R. Bowden,
+      "Neural Sign Language Translation," in Proc. IEEE CVPR, 2018.
+
+[3]   J. Huang, W. Zhou, Q. Zhang, H. Li, and W. Li, "Video-based Sign
+      Language Recognition without Temporal Segmentation," in Proc. AAAI,
+      2018.
+
+[4]   N. C. Camgoz, O. Koller, S. Hadfield, and R. Bowden, "Sign Language
+      Transformers: Joint End-to-End Sign Language Recognition and
+      Translation," in Proc. IEEE CVPR, 2020.
+
+[5]   O. Koller, J. Forster, and H. Ney, "Continuous Sign Language
+      Recognition: Towards Large Vocabulary Statistical Recognition Systems
+      Handling Multiple Signers," Comput. Vis. Image Underst., 2015.
+
+[6]   N. C. Camgoz, S. Hadfield, O. Koller, and R. Bowden, "SubUNets:
+      End-to-End Hand Shape and Continuous Sign Language Recognition," in
+      Proc. IEEE ICCV, 2017.
+
+[7]   S. Jiang, B. Sun, L. Wang, Y. Bai, K. Li, and Y. Fu, "Skeleton
+      Aware Multi-Modal Sign Language Recognition," in Proc. IEEE CVPRW,
+      2021.
+
+[8]   C. Lugaresi, J. Tang, H. Nash, et al., "MediaPipe: A Framework for
+      Building Perception Pipelines," arXiv:1906.08172, 2019.
+
+[9]   W. Kumara and S. Gunasekara, "Sinhala Sign Language Recognition Using
+      Image Processing and Machine Learning," in Proc. ICAC, 2019.
+
+[10]  S. Bai, J. Z. Kolter, and V. Koltun, "An Empirical Evaluation of
+      Generic Convolutional and Recurrent Networks for Sequence Modeling,"
+      arXiv:1803.01271, 2018.
+
+
+================================================================================
+  END OF RESEARCH PAPER
+================================================================================

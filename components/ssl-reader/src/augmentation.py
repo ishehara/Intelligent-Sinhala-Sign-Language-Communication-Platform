@@ -555,20 +555,20 @@ class StreamSpecificAugmenter:
         
         # Hand augmentation (aggressive - fast movements need more variation)
         self.hand_augmenter = SkeletonAugmenter(
-            rotation_range=(-8.0, 8.0),      # More rotation
-            scale_range=(0.85, 1.15),        # More scaling
-            noise_std=0.003,                 # More noise
-            temporal_shift_prob=0.4,         # More temporal variation
-            apply_prob=0.85                  # Apply frequently
+            rotation_range=(-12.0, 12.0),    # More rotation
+            scale_range=(0.80, 1.20),        # More scaling
+            noise_std=0.005,                 # More noise
+            temporal_shift_prob=0.5,         # More temporal variation
+            apply_prob=0.90                  # Apply frequently
         )
         
         # Face augmentation (conservative - expressions need stability)
         self.face_augmenter = SkeletonAugmenter(
-            rotation_range=(-3.0, 3.0),      # Less rotation (head doesn't move much)
-            scale_range=(0.95, 1.05),        # Less scaling
-            noise_std=0.001,                 # Less noise (blendshapes sensitive)
-            temporal_shift_prob=0.2,         # Less temporal (expressions are smooth)
-            apply_prob=0.75                  # Apply moderately
+            rotation_range=(-4.0, 4.0),      # Slightly more rotation
+            scale_range=(0.93, 1.07),        # Slightly more scaling
+            noise_std=0.002,                 # Slightly more noise
+            temporal_shift_prob=0.25,        # Less temporal (expressions are smooth)
+            apply_prob=0.80                  # Apply moderately
         )
         
         # Pose augmentation (minimal - body movements are smooth)

@@ -1,0 +1,57 @@
+================================================================================
+  ENVIRONMENTAL SOUND ALERT MODULE — METHODOLOGY
+================================================================================
+
+The Environmental Sound Alert component detects dangerous sounds in real time
+using the mobile microphone and delivers graded visual alerts to deaf and
+hearing-impaired users via audio preprocessing → MFCC extraction → CNN
+classification → Flask REST API → React Native frontend.
+
+DATASET
+-------
+Seven classes: Bus horn · Car horn · Train horn · Truck horn · Ambulance ·
+Fire truck · Police  (~3,230 clips, stratified 64/16/20 split).
+Traffic ambient noise excluded (continuous, non-directional, high false-alert
+risk). Class imbalance addressed with per-class sample weights.
+
+FEATURE EXTRACTION
+------------------
+librosa · 22,050 Hz mono · 2.5 s (zero-padded/truncated) · silence trim top_db=40
+13 MFCCs × 40 frames → 520 features reshaped to (13 × 40 × 1).
+Per-coefficient z-score normalisation applied identically at train and inference.
+
+MODEL ARCHITECTURE
+------------------
+  Input (13 × 40 × 1)
+  → Conv2D(32/64/128) + BatchNorm + MaxPool + Dropout  [×3]
+  → Dense(256) + Dense(128) → Dense(7, Softmax)
+  ~293,000 params · Adam · Sparse Categorical Cross-Entropy
+
+TRAINING
+--------
+Batch 32 · 100 epochs max · stopped at 76 (EarlyStopping patience 15)
+ModelCheckpoint (best val_accuracy) · ReduceLROnPlateau (factor 0.5)
+
+EVALUATION METRICS
+------------------
+  Metric                      Result
+  ─────────────────────────── ──────────
+  Top-1 Validation Accuracy   94.40%
+  Top-1 Test Accuracy         92.19%
+  Sound classes               7
+  Model parameters            ~293,000
+  Best checkpoint epoch       76
+
+IMPLEMENTATION STATUS
+---------------------
+Completed: MFCC pipeline, CNN training, Flask API, React Native three-tier alert
+display (full-screen overlay / auto-dismiss banner / silent log), real-time loop.
+
+Next: Alert prioritisation (siren > heavy horn > car horn when concurrent
+detections occur) · TFLite on-device inference · user testing.
+
+Expected Outcome: Real-time detection of 7 sound classes at >90% accuracy with
+graded alerts deliverable to deaf users, and a ~293K-parameter model suitable
+for future on-device mobile deployment.
+
+================================================================================

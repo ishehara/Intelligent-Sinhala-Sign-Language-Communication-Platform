@@ -1,0 +1,46 @@
+INFO:__main__:Using device: cuda
+INFO:__main__:Data augmentation: Enabled
+INFO:__main__:Initializing MediaPipe feature extractor...
+INFO:preprocessing_mediapipe:Model already exists: G:\research\Intelligent-Sinhala-Sign-Language-Communication-Platform\components\ssl-reader\models\mediapipe\hand_landmarker.task
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+W0000 00:00:1777650477.520816   16416 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1777650477.563251   16416 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+INFO:preprocessing_mediapipe:Model already exists: G:\research\Intelligent-Sinhala-Sign-Language-Communication-Platform\components\ssl-reader\models\mediapipe\face_landmarker.task
+W0000 00:00:1777650477.570663   24056 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+W0000 00:00:1777650477.585241   22544 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1777650477.610604   22544 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+INFO:__main__:Feature dimension: 306
+INFO:__main__:  - Hands: 126 dims (2 hands × 21 landmarks × 3 coords)
+INFO:__main__:  - Face: 180 dims (Filtered 60 key landmarks × 3 coords (spatial only, NO blendshapes))
+INFO:__main__:  - Pose: 0 dims (33 landmarks × 3 coords)
+INFO:__main__:Creating dataset splits...
+INFO:preprocessing_simple:Scanning dataset at: G:\research\Intelligent-Sinhala-Sign-Language-Communication-Platform\datasets\signVideo
+INFO:preprocessing_simple:Processing category: Adjectives
+INFO:preprocessing_simple:Processing category: Adverb
+INFO:preprocessing_simple:Processing category: Colors
+INFO:preprocessing_simple:Processing category: Conjunctions
+INFO:preprocessing_simple:Processing category: Days
+INFO:preprocessing_simple:Processing category: Determiner
+INFO:preprocessing_simple:Processing category: Greetings
+INFO:preprocessing_simple:Processing category: Interjection
+INFO:preprocessing_simple:Processing category: Months
+INFO:preprocessing_simple:Processing category: Nouns
+INFO:preprocessing_simple:Processing category: Numbers
+INFO:preprocessing_simple:Processing category: People
+INFO:preprocessing_simple:Processing category: Places
+INFO:preprocessing_simple:Processing category: Preposition
+INFO:preprocessing_simple:Processing category: Vehicles
+INFO:preprocessing_simple:Processing category: Verbs
+INFO:preprocessing_simple:Found 383 sign classes with 4236 total videos
+INFO:preprocessing_simple:Dataset splits - Train: 2692, Val: 845, Test: 699
+INFO:preprocessing_simple:Saved label mapping to G:\research\Intelligent-Sinhala-Sign-Language-Communication-Platform\datasets\label_mapping.json
+INFO:__main__:Number of classes: 383
+INFO:__main__:Train samples: 2692
+INFO:__main__:Val samples: 845
+INFO:__main__:Test samples: 699
+INFO:dataset:\u2713 Stream-specific augmentation enabled for training
+INFO:__main__:\u2713 Weighted random sampling enabled — all classes equally represented per epoch
+INFO:__main__:Creating multistream model...
+INFO:__main__:Model parameters: 2,329,920
+INFO:__main__:Starting training...
+W0000 00:00:1777650481.537448   16416 landmark_projection_calculator.cc:81] Using NORM_RECT without IMAGE_DIMENSIONS is only supported for the square ROI. Provide IMAGE_DIMENSIONS or use PROJECTION_MATRIX.

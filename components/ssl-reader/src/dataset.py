@@ -131,6 +131,10 @@ class SinhalaSignLanguageDataset(Dataset):
             try:
                 with open(cache_path, 'rb') as f:
                     features = pickle.load(f)
+                # Validate feature dimensions — invalidate cache if shape changed
+                expected_dim = self.feature_extractor.get_feature_dim()
+                if features is not None and hasattr(features, 'shape') and features.ndim == 2 and features.shape[1] != expected_dim:
+                    features = None  # Force re-extraction; new result will overwrite cache
             except Exception as e:
                 logger.warning(f"Failed to load cache for {video_path}: {e}")
                 features = None
