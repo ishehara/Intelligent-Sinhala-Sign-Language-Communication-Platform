@@ -11,6 +11,25 @@ asks the trained brain (model) what it is, and instantly displays the result
 import numpy as np
 import json
 import tensorflow as tf
+
+# ── Keras compatibility patch ────────────────────────────────────────────────
+# Models trained with Keras ≥ 3.9 include 'quantization_config' in Dense's
+# get_config() output.  When loading on an older Keras (< 3.9) that does not
+# yet accept that kwarg, the deserializer raises ValueError.  Strip it here
+# so the model loads correctly regardless of which Keras version is installed.
+try:
+    import keras as _keras
+    _orig_layer_init = _keras.layers.Layer.__init__
+
+    def _compat_layer_init(self, *args, **kwargs):
+        kwargs.pop("quantization_config", None)
+        _orig_layer_init(self, *args, **kwargs)
+
+    _keras.layers.Layer.__init__ = _compat_layer_init
+except Exception:
+    pass
+# ─────────────────────────────────────────────────────────────────────────────
+
 import librosa
 import sounddevice as sd
 from pathlib import Path

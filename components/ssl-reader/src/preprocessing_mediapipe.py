@@ -404,11 +404,12 @@ def create_dataset_splits(
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
-    max_frames: int = 60
+    max_frames: int = 60,
+    filter_categories: list = None
 ) -> Tuple[Dict[str, List], Dict[str, int]]:
     """
     Create train/val/test splits from video dataset.
     (Same implementation as preprocessing_simple.py)
     """
     from preprocessing_simple import create_dataset_splits as create_splits
-    return create_splits(dataset_root, train_ratio, val_ratio, test_ratio, max_frames)
+    return create_splits(dataset_root, train_ratio, val_ratio, test_ratio, max_frames, filter_categories)

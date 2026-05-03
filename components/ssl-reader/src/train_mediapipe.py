@@ -280,6 +280,8 @@ def main():
     parser.add_argument('--dataset_root', type=str, 
                        default='datasets/signVideo',
                        help='Path to dataset root directory')
+    parser.add_argument('--categories', type=str, nargs='+', default=None,
+                       help='Only train on these categories e.g. --categories Verbs Nouns')
     
     # MediaPipe arguments
     parser.add_argument('--use_hands', action='store_true', default=True,
@@ -405,9 +407,12 @@ def main():
     
     # Create dataset splits
     logger.info("Creating dataset splits...")
+    if args.categories:
+        logger.info(f"Filtering to categories: {args.categories}")
     splits, label_map = create_dataset_splits(
         str(dataset_root),
-        max_frames=args.max_frames
+        max_frames=args.max_frames,
+        filter_categories=args.categories
     )
     
     num_classes = len(label_map)

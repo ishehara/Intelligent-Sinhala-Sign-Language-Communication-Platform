@@ -37,18 +37,32 @@ import sys
 import uuid
 import tempfile
 import traceback
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
 # Ensure ffmpeg is in PATH for M4A/AAC decoding (audioread needs it)
-_FFMPEG_BIN = os.path.expandvars(
-    r"%LOCALAPPDATA%\Microsoft\WinGet\Packages"
-    r"\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
-    r"\ffmpeg-8.0.1-full_build\bin"
-)
-if os.path.isdir(_FFMPEG_BIN) and _FFMPEG_BIN not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = os.environ["PATH"] + os.pathsep + _FFMPEG_BIN
-    print(f"[INFO] Added ffmpeg to PATH: {_FFMPEG_BIN}")
+# Search known locations in priority order
+_FFMPEG_CANDIDATES = [
+    r"C:\KMPlayer\ffmpeg.exe",
+    r"C:\Program Files\GNU Octave\Octave-10.3.0\mingw64\bin\ffmpeg.exe",
+    os.path.expandvars(
+        r"%LOCALAPPDATA%\Microsoft\WinGet\Packages"
+        r"\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+        r"\ffmpeg-8.0.1-full_build\bin\ffmpeg.exe"
+    ),
+]
+FFMPEG_EXE = None
+for _candidate in _FFMPEG_CANDIDATES:
+    if os.path.isfile(_candidate):
+        FFMPEG_EXE = _candidate
+        _ffmpeg_bin_dir = str(Path(_candidate).parent)
+        if _ffmpeg_bin_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = os.environ["PATH"] + os.pathsep + _ffmpeg_bin_dir
+        print(f"[INFO] ffmpeg found: {FFMPEG_EXE}")
+        break
+if FFMPEG_EXE is None:
+    print("[WARN] ffmpeg not found — M4A files from Android may fail to decode")
 
 import numpy as np
 import librosa
@@ -138,9 +152,31 @@ def predict():
 
         # ── Decode audio ──────────────────────────────────────────────────────
         # soundfile handles WAV/FLAC/OGG natively (no ffmpeg required).
-        # librosa fallback handles M4A/AAC/MP3 via audioread + ffmpeg.
+        # M4A/AAC (Android) is converted to WAV via ffmpeg subprocess first.
+        decode_path = tmp_path
+        wav_tmp_path = None
+
+        # If the file is M4A/AAC/MP4 and ffmpeg is available, convert it first
+        if suffix.lower() in (".m4a", ".aac", ".mp4") and FFMPEG_EXE:
+            try:
+                wav_tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                wav_tmp_path = wav_tmp.name
+                wav_tmp.close()
+                result = subprocess.run(
+                    [FFMPEG_EXE, "-y", "-i", tmp_path, "-ar", str(det.sample_rate),
+                     "-ac", "1", "-f", "wav", wav_tmp_path],
+                    capture_output=True, timeout=30
+                )
+                if result.returncode == 0:
+                    decode_path = wav_tmp_path
+                    print(f"[INFO] M4A converted to WAV via ffmpeg")
+                else:
+                    print(f"[WARN] ffmpeg conversion failed: {result.stderr.decode()[:200]}")
+            except Exception as e:
+                print(f"[WARN] ffmpeg conversion error: {e}")
+
         try:
-            audio, orig_sr = sf.read(tmp_path, always_2d=False)
+            audio, orig_sr = sf.read(decode_path, always_2d=False)
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)          # stereo → mono
             audio = audio.astype("float32")
@@ -149,9 +185,9 @@ def predict():
                     audio, orig_sr=orig_sr, target_sr=det.sample_rate
                 )
         except Exception:
-            # Fallback: librosa uses audioread which supports M4A with ffmpeg
+            # Final fallback: librosa with audioread
             audio, _ = librosa.load(
-                tmp_path, sr=det.sample_rate, mono=True, duration=det.duration
+                decode_path, sr=det.sample_rate, mono=True, duration=det.duration
             )
 
         # Pad/trim to exactly the duration the model was trained on
@@ -211,6 +247,8 @@ def predict():
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+        if wav_tmp_path and os.path.exists(wav_tmp_path):
+            os.unlink(wav_tmp_path)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

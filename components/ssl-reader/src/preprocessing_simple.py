@@ -201,7 +201,8 @@ def create_dataset_splits(
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
-    max_frames: int = 60
+    max_frames: int = 60,
+    filter_categories: list = None
 ) -> Tuple[Dict[str, List], Dict[str, int]]:
     """
     Create train/val/test splits from the video dataset.
@@ -229,11 +230,16 @@ def create_dataset_splits(
     logger.info(f"Scanning dataset at: {dataset_path}")
     
     # Iterate through category directories
-    for category_dir in dataset_path.iterdir():
+    for category_dir in sorted(dataset_path.iterdir()):
         if not category_dir.is_dir():
             continue
         
         category_name = category_dir.name
+
+        # Filter to specific categories if requested
+        if filter_categories and category_name not in filter_categories:
+            continue
+
         logger.info(f"Processing category: {category_name}")
         
         # Iterate through subcategories (e.g., "Hello", "Good morning")
@@ -244,17 +250,16 @@ def create_dataset_splits(
             sign_name = sign_dir.name
             full_label = f"{category_name}/{sign_name}"
             
-<<<<<<< Updated upstream
-            # Collect video files (case-insensitive: mp4, avi, mov)
-            video_files = (list(sign_dir.glob("*.mp4")) + list(sign_dir.glob("*.MP4")) +
-                           list(sign_dir.glob("*.avi")) + list(sign_dir.glob("*.AVI")) +
-                           list(sign_dir.glob("*.mov")) + list(sign_dir.glob("*.MOV")))
-=======
-            # Collect video files (include .mov files which are part of the full dataset)
-            video_files = (list(sign_dir.glob("*.mp4")) +
-                           list(sign_dir.glob("*.mov")) +
-                           list(sign_dir.glob("*.avi")))
->>>>>>> Stashed changes
+            # Collect video files (mp4, mov, avi — deduplicated for Windows case-insensitive FS)
+            seen = set()
+            video_files = []
+            for p in (list(sign_dir.glob("*.mp4")) + list(sign_dir.glob("*.MP4")) +
+                      list(sign_dir.glob("*.mov")) + list(sign_dir.glob("*.MOV")) +
+                      list(sign_dir.glob("*.avi")) + list(sign_dir.glob("*.AVI"))):
+                key = p.name.lower()
+                if key not in seen:
+                    seen.add(key)
+                    video_files.append(p)
             
             if len(video_files) > 0:
                 if full_label not in label_to_idx:
