@@ -161,6 +161,25 @@ def predict():
         else:
             audio = audio[:target_len]
 
+        # ── Silence gate: skip very quiet recordings ──────────────────────────
+        # Compute RMS energy to filter out silent/ambient background noise
+        rms = float(np.sqrt(np.mean(audio.astype('float64')**2)))
+        if rms < 0.008:
+            # Too quiet — return an ambient detection (low confidence)
+            print(
+                f"[PREDICT] RMS energy too low ({rms:.6f} < 0.008) — skipping prediction"
+            )
+            return jsonify({
+                "id":         str(uuid.uuid4()),
+                "type":       "ambient",
+                "title":      "Ambient Background Noise",
+                "icon":       "🔇",
+                "severity":   "low",
+                "confidence": 0,
+                "timestamp":  datetime.now().isoformat(),
+                "detected":   False,
+            })
+
         predicted_class, confidence, _ = det.predict_from_audio(audio)
         alert_type, icon, severity = CLASS_MAP.get(
             predicted_class,
