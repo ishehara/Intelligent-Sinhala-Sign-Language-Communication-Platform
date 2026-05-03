@@ -1,6 +1,11 @@
 """
 Sound Detection Inference Script
 Demonstrates how to use the trained model to detect sounds in audio files.
+
+This script loads the trained "brain" (saved model) and uses it to guess the sound 
+of a completely new, pre-recorded audio file (.wav/.mp3). It is mostly used for manual 
+testing to see if the model correctly identifies saved sound files.
+
 """
 
 import numpy as np

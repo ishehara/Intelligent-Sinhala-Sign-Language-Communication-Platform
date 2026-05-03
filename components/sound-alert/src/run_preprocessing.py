@@ -1,6 +1,10 @@
 """
 Run audio preprocessing for all sound datasets.
 This script processes Vehicle Horns and Sirens datasets.
+
+This script starts the entire process. It locates where the raw audio files 
+(Vehicle Horns and Sirens) are stored and commands the main preprocessing engine 
+to start converting them into machine-readable data.
 """
 
 import sys

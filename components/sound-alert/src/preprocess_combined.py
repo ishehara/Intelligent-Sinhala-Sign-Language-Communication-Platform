@@ -1,6 +1,10 @@
 """
 Combined Audio Preprocessing for Horns and Sirens
 Processes both vehicle horns and siren sounds for unified detection model
+
+If we want the system to detect both horns and sirens at the same time, 
+this script takes the audio files from their separate folders and copies them 
+into one big mixed folder so they can be processed together.
 """
 
 import os

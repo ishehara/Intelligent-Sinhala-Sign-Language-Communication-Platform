@@ -1,6 +1,12 @@
 """
 CNN Model Training for Sound Detection
 Trains a convolutional neural network on MFCC features for audio classification.
+
+This script takes the processed numerical data (MFCC numbers) and builds an Artificial 
+Intelligence brain (CNN). It trains this brain by showing it thousands of sound examples 
+until it learns the patterns. Finally, it saves the fully trained brain (.keras file) 
+so it can be used later.
+
 """
 
 import numpy as np
